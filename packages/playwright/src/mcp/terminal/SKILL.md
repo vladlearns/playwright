@@ -100,9 +100,19 @@ playwright-cli tab-select 0
 playwright-cli console
 playwright-cli console warning
 playwright-cli network
-playwright-cli run-code "await page.waitForTimeout(1000)"
+playwright-cli run-code "async page => await page.context().grantPermissions(['geolocation'])"
 playwright-cli tracing-start
 playwright-cli tracing-stop
+```
+
+### Configuration
+```bash
+# configure the session
+playwright-cli config my-config.json
+# Configure named session
+playwright-cli --session=mysession config my-config.json
+# Start with configured session
+playwright-cli open --config=my-config.json
 ```
 
 ### Sessions

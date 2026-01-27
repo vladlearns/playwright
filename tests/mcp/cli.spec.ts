@@ -110,7 +110,7 @@ test.describe('core', () => {
   });
 
   test('check', async ({ cli, server, mcpBrowser }) => {
-    const active = mcpBrowser === 'webkit' && process.platform === 'darwin' ? '' : '[active] ';
+    const active = mcpBrowser === 'webkit' && process.platform !== 'linux' ? '' : '[active] ';
     server.setContent('/', `<input type="checkbox">`, 'text/html');
     await cli('open', server.PREFIX);
     await cli('check', 'e2');
@@ -119,7 +119,7 @@ test.describe('core', () => {
   });
 
   test('uncheck', async ({ cli, server, mcpBrowser }) => {
-    const active = mcpBrowser === 'webkit' && process.platform === 'darwin' ? '' : '[active] ';
+    const active = mcpBrowser === 'webkit' && process.platform !== 'linux' ? '' : '[active] ';
     server.setContent('/', `<input type="checkbox" checked>`, 'text/html');
     await cli('open', server.PREFIX);
     await cli('uncheck', 'e2');
@@ -476,5 +476,31 @@ test.describe('session', () => {
   test('session-delete non-existent session', async ({ cli }) => {
     const { output } = await cli('session-delete', 'nonexistent');
     expect(output).toContain(`No user data found for session 'nonexistent'.`);
+  });
+});
+
+test.describe('config', () => {
+  test('should work', async ({ cli, server }, testInfo) => {
+    // Start a session with default config
+    await cli('open', server.PREFIX);
+    const { output: beforeOutput } = await cli('eval', 'window.innerWidth + "x" + window.innerHeight');
+    expect(beforeOutput).toContain('1280x720');
+
+    const config = {
+      browser: {
+        contextOptions: {
+          viewport: { width: 700, height: 500 },
+        },
+      },
+    };
+    const configPath = testInfo.outputPath('session-config.json');
+    await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
+
+    const { output: configureOutput } = await cli('config', configPath);
+    expect(configureOutput).toContain(`- Using config file at \`session-config.json\`.`);
+
+    await cli('open', server.PREFIX);
+    const { output: afterOutput } = await cli('eval', 'window.innerWidth + "x" + window.innerHeight');
+    expect(afterOutput).toContain('700x500');
   });
 });
