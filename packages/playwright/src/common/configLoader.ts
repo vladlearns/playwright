@@ -103,33 +103,6 @@ async function loadUserConfig(location: ConfigLocation): Promise<Config> {
   return object as Config;
 }
 
-function findSimilarProperty(unknown: string, known: string[]): string | null {
-  const unknownLower = unknown.toLowerCase();
-
-  for (const key of known) {
-    if (key.toLowerCase() === unknownLower)
-      return key;
-
-  }
-
-  for (const key of known) {
-    if (Math.abs(key.length - unknown.length) <= 2) {
-      const keyLower = key.toLowerCase();
-      let distance = 0;
-      for (let i = 0; i < Math.max(key.length, unknown.length); i++) {
-        if (keyLower[i] !== unknownLower[i])
-          distance++;
-      }
-
-      if (distance <= 2)
-        return key;
-
-    }
-  }
-
-  return null;
-}
-
 export async function loadConfig(location: ConfigLocation, overrides?: ConfigCLIOverrides, ignoreProjectDependencies = false, metadata?: Config['metadata']): Promise<FullConfigInternal> {
   // 0. Setup ESM loader if needed.
   if (!registerESMLoader()) {
@@ -201,21 +174,6 @@ function validateConfig(file: string, config: Config) {
         throw errorWithFile(file,
             `Configuration option "${path}" ${issue.message}\n` +
           `Received: ${JSON.stringify(receivedValue)}`
-        );
-      }
-
-      if (issue.code === 'unrecognized_keys') {
-        const unknownKey = issue.keys[0];
-        const knownKeys = Object.keys(testConfigSchema.shape);
-        const suggestion = findSimilarProperty(unknownKey, knownKeys);
-        let message = 'is not recognized';
-        if (suggestion)
-          message += `. Did you mean "${suggestion}"?`;
-
-        const propertyName = path || unknownKey;
-        throw errorWithFile(file,
-            `Configuration option "${propertyName}" ${message}\n` +
-          `Received: ${JSON.stringify(config[unknownKey as keyof Config])}`
         );
       }
 

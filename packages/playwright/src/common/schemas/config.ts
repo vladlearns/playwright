@@ -25,7 +25,6 @@ import {
 /**
  * Zod schema for TestConfig validation.
  *
- * Validates top-level configuration options with strict mode enabled for typo detection.
  */
 export const testConfigSchema = zod.object({
   /**
@@ -361,7 +360,4 @@ export const testConfigSchema = zod.object({
    */
   ignoreSnapshots: zod.boolean().optional(),
 
-}).strict(); // Catch typos in config property names
-
-// Note: Type export can be added later if needed
-// export type TestConfig = zod.infer<typeof testConfigSchema>;
+}).loose(); // Allow unknown props for backward compatibility
