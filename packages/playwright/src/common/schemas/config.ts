@@ -18,7 +18,6 @@ import { z as zod } from 'playwright-core/lib/mcpBundle';
 import {
   nonNegativeNumber,
   stringOrArray,
-  stringOrArrayOptional,
   workersOrPercentage,
   regExpOrArray,
 } from './base';
@@ -195,22 +194,47 @@ export const testConfigSchema = zod.object({
   }).optional(),
 
   /**
-   * Properties already validated in configLoader.ts
-   * (Commented out to avoid duplication)
+   * FORBID only tests, failing when they are encountered.
    */
+  forbidOnly: zod.boolean().optional(),
 
-  // forbidOnly: zod.boolean().optional(),
-  // projects: zod.array(zod.any()).optional(),
-  // reporter: zod.array(zod.any()).optional(),
-  // reportSlowTests: zod.object({
-  //   max: zod.number().int().min(0),
-  //   threshold: zod.number().int().min(0),
-  // }).optional(),
-  // shard: zod.object({
-  //   total: zod.number().int().min(1),
-  //   current: zod.number().int().min(1),
-  // }).optional(),
-  // tsconfig: zod.string().optional(), // File existence checked separately
+  /**
+   * Project configuration.
+   */
+  projects: zod.array(zod.any()).optional(),
+
+  /**
+   * Reporter configuration.
+   */
+  reporter: zod.union([
+    zod.string(),
+    zod.array(zod.union([
+      zod.string(),
+      zod.tuple([zod.string(), zod.any()])
+    ]))
+  ]).optional(),
+
+  /**
+   * Report slow tests configuration.
+   */
+  reportSlowTests: zod.object({
+    max: zod.number().int().min(0).optional(),
+    threshold: zod.number().int().min(0).optional(),
+  }).optional().nullable(),
+
+  /**
+   * Shard configuration.
+   */
+  shard: zod.object({
+    total: zod.number().int().min(1).optional(),
+    current: zod.number().int().min(1).optional(),
+  }).optional().nullable(),
+
+  /**
+   * Path to TypeScript configuration file.
+   * Note: File existence is validated separately in configLoader.ts.
+   */
+  tsconfig: zod.string().optional(),
 
   /**
    * Worker & Parallelism options
@@ -265,72 +289,6 @@ export const testConfigSchema = zod.object({
    * @default 1
    */
   repeatEach: nonNegativeNumber.optional(),
-
-  /**
-   * Project configuration
-   */
-
-  /**
-   * List of test projects.
-   * Each project can have its own configuration.
-   */
-  projects: zod.array(zod.any()).optional(),
-
-  /**
-   * Reporter configuration
-   */
-
-  /**
-   * Reporter(s) to use.
-   * Can be a string, an array of strings, or an array of tuples [name, options].
-   */
-  reporter: zod.union([
-    zod.string(),
-    zod.array(zod.union([
-      zod.string(),
-      zod.tuple([zod.string(), zod.any()])
-    ]))
-  ]).optional(),
-
-  /**
-   * Configuration for reporting slow tests.
-   */
-  reportSlowTests: zod.object({
-    /**
-     * Maximum test duration in milliseconds before being considered slow.
-     */
-    max: zod.number().int().min(0).optional(),
-
-    /**
-     * Threshold in milliseconds for considering a test slow.
-     */
-    threshold: zod.number().int().min(0).optional(),
-  }).optional().nullable(),
-
-  /**
-   * Shard configuration to split tests into shards.
-   */
-  shard: zod.object({
-    /**
-     * Total number of shards.
-     */
-    total: zod.number().int().min(1).optional(),
-
-    /**
-     * Current shard number (1-based).
-     */
-    current: zod.number().int().min(1).optional(),
-  }).optional().nullable(),
-
-  /**
-   * Path to TypeScript configuration file.
-   */
-  tsconfig: zod.string().optional(),
-
-  /**
-   * FORBID only tests, failing when they are encountered.
-   */
-  forbidOnly: zod.boolean().optional(),
 
   /**
    * Core directory options

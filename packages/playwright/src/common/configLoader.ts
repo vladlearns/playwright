@@ -18,7 +18,6 @@ import fs from 'fs';
 import path from 'path';
 
 import { isRegExp } from 'playwright-core/lib/utils';
-import type { ZodError } from 'zod';
 
 import { requireOrImport, setSingleTSConfig, setTransformConfig } from '../transform/transform';
 import { errorWithFile, fileIsModule } from '../util';
@@ -26,6 +25,8 @@ import { FullConfigInternal } from './config';
 import { configureESMLoader, configureESMLoaderTransformConfig, registerESMLoader } from './esmLoaderHost';
 import { addToCompilationCache } from '../transform/compilationCache';
 import { testConfigSchema } from './schemas/config';
+import { testOptionsSchema } from './schemas/testOptions';
+import type { ZodError } from 'zod';
 
 import type { ConfigLocation } from './config';
 import type { ConfigCLIOverrides, SerializedConfig } from './ipc';
@@ -106,9 +107,9 @@ function findSimilarProperty(unknown: string, known: string[]): string | null {
   const unknownLower = unknown.toLowerCase();
 
   for (const key of known) {
-    if (key.toLowerCase() === unknownLower) {
+    if (key.toLowerCase() === unknownLower)
       return key;
-    }
+
   }
 
   for (const key of known) {
@@ -116,11 +117,13 @@ function findSimilarProperty(unknown: string, known: string[]): string | null {
       const keyLower = key.toLowerCase();
       let distance = 0;
       for (let i = 0; i < Math.max(key.length, unknown.length); i++) {
-        if (keyLower[i] !== unknownLower[i]) distance++;
+        if (keyLower[i] !== unknownLower[i])
+          distance++;
       }
-      if (distance <= 2) {
+
+      if (distance <= 2)
         return key;
-      }
+
     }
   }
 
@@ -181,14 +184,14 @@ function validateConfig(file: string, config: Config) {
         let receivedValue: any = undefined;
         if (issue.path.length > 0) {
           let current: any = config;
-          for (const key of issue.path) {
+          for (const key of issue.path)
             current = current[key];
-          }
+
           receivedValue = current;
         }
         const message = issue.message.replace('Invalid input: ', '');
         throw errorWithFile(file,
-          `Configuration option "${path}" ${message}\n` +
+            `Configuration option "${path}" ${message}\n` +
           `Received: ${JSON.stringify(receivedValue)}`
         );
       }
@@ -196,7 +199,7 @@ function validateConfig(file: string, config: Config) {
       if (issue.code === 'invalid_value') {
         const receivedValue = issue.path.length > 0 ? config[path as keyof Config] : undefined;
         throw errorWithFile(file,
-          `Configuration option "${path}" ${issue.message}\n` +
+            `Configuration option "${path}" ${issue.message}\n` +
           `Received: ${JSON.stringify(receivedValue)}`
         );
       }
@@ -206,12 +209,12 @@ function validateConfig(file: string, config: Config) {
         const knownKeys = Object.keys(testConfigSchema.shape);
         const suggestion = findSimilarProperty(unknownKey, knownKeys);
         let message = 'is not recognized';
-        if (suggestion) {
+        if (suggestion)
           message += `. Did you mean "${suggestion}"?`;
-        }
+
         const propertyName = path || unknownKey;
         throw errorWithFile(file,
-          `Configuration option "${propertyName}" ${message}\n` +
+            `Configuration option "${propertyName}" ${message}\n` +
           `Received: ${JSON.stringify(config[unknownKey as keyof Config])}`
         );
       }
@@ -219,14 +222,14 @@ function validateConfig(file: string, config: Config) {
       if (issue.code === 'too_small' || issue.code === 'too_big') {
         const receivedValue = issue.path.length > 0 ? config[path as keyof Config] : undefined;
         throw errorWithFile(file,
-          `Configuration option "${path}" ${issue.message}\n` +
+            `Configuration option "${path}" ${issue.message}\n` +
           `Received: ${JSON.stringify(receivedValue)}`
         );
       }
 
       const propertyName = path || 'configuration';
       throw errorWithFile(file,
-        `Configuration option "${propertyName}" ${issue.message}`
+          `Configuration option "${propertyName}" ${issue.message}`
       );
     }
     throw error;
@@ -234,99 +237,19 @@ function validateConfig(file: string, config: Config) {
 
   validateProject(file, config, 'config');
 
+  // Validate config-level use options
+  if (config.use !== undefined)
+    validateTestOptions(file, config.use, 'config.use');
 
-  if ('forbidOnly' in config && config.forbidOnly !== undefined) {
-    if (typeof config.forbidOnly !== 'boolean')
-      throw errorWithFile(file, `config.forbidOnly must be a boolean`);
-  }
-
-  if ('globalSetup' in config && config.globalSetup !== undefined) {
-    if (Array.isArray(config.globalSetup)) {
-      config.globalSetup.forEach((item, index) => {
-        if (typeof item !== 'string')
-          throw errorWithFile(file, `config.globalSetup[${index}] must be a string`);
-      });
-    } else if (typeof config.globalSetup !== 'string') {
-      throw errorWithFile(file, `config.globalSetup must be a string`);
-    }
-  }
-
-  if ('globalTeardown' in config && config.globalTeardown !== undefined) {
-    if (Array.isArray(config.globalTeardown)) {
-      config.globalTeardown.forEach((item, index) => {
-        if (typeof item !== 'string')
-          throw errorWithFile(file, `config.globalTeardown[${index}] must be a string`);
-      });
-    } else if (typeof config.globalTeardown !== 'string') {
-      throw errorWithFile(file, `config.globalTeardown must be a string`);
-    }
-  }
-
-  if ('globalTimeout' in config && config.globalTimeout !== undefined) {
-    if (typeof config.globalTimeout !== 'number' || config.globalTimeout < 0)
-      throw errorWithFile(file, `config.globalTimeout must be a non-negative number`);
-  }
-
-  if ('maxFailures' in config && config.maxFailures !== undefined) {
-    if (typeof config.maxFailures !== 'number' || config.maxFailures < 0)
-      throw errorWithFile(file, `config.maxFailures must be a non-negative number`);
-  }
-
-  if ('preserveOutput' in config && config.preserveOutput !== undefined) {
-    if (typeof config.preserveOutput !== 'string' || !['always', 'never', 'failures-only'].includes(config.preserveOutput))
-      throw errorWithFile(file, `config.preserveOutput must be one of "always", "never" or "failures-only"`);
-  }
-
-  if ('projects' in config && config.projects !== undefined) {
-    if (!Array.isArray(config.projects))
-      throw errorWithFile(file, `config.projects must be an array`);
+  // Validate projects recursively
+  if (config.projects) {
     config.projects.forEach((project, index) => {
       validateProject(file, project, `config.projects[${index}]`);
     });
   }
 
-  if ('quiet' in config && config.quiet !== undefined) {
-    if (typeof config.quiet !== 'boolean')
-      throw errorWithFile(file, `config.quiet must be a boolean`);
-  }
-
-  if ('reporter' in config && config.reporter !== undefined) {
-    if (Array.isArray(config.reporter)) {
-      config.reporter.forEach((item, index) => {
-        if (!Array.isArray(item) || item.length <= 0 || item.length > 2 || typeof item[0] !== 'string')
-          throw errorWithFile(file, `config.reporter[${index}] must be a tuple [name, optionalArgument]`);
-      });
-    } else if (typeof config.reporter !== 'string') {
-      throw errorWithFile(file, `config.reporter must be a string`);
-    }
-  }
-
-  if ('reportSlowTests' in config && config.reportSlowTests !== undefined && config.reportSlowTests !== null) {
-    if (!config.reportSlowTests || typeof config.reportSlowTests !== 'object')
-      throw errorWithFile(file, `config.reportSlowTests must be an object`);
-    if (!('max' in config.reportSlowTests) || typeof config.reportSlowTests.max !== 'number' || config.reportSlowTests.max < 0)
-      throw errorWithFile(file, `config.reportSlowTests.max must be a non-negative number`);
-    if (!('threshold' in config.reportSlowTests) || typeof config.reportSlowTests.threshold !== 'number' || config.reportSlowTests.threshold < 0)
-      throw errorWithFile(file, `config.reportSlowTests.threshold must be a non-negative number`);
-  }
-
-  if ('shard' in config && config.shard !== undefined && config.shard !== null) {
-    if (!config.shard || typeof config.shard !== 'object')
-      throw errorWithFile(file, `config.shard must be an object`);
-    if (!('total' in config.shard) || typeof config.shard.total !== 'number' || config.shard.total < 1)
-      throw errorWithFile(file, `config.shard.total must be a positive number`);
-    if (!('current' in config.shard) || typeof config.shard.current !== 'number' || config.shard.current < 1 || config.shard.current > config.shard.total)
-      throw errorWithFile(file, `config.shard.current must be a positive number, not greater than config.shard.total`);
-  }
-
-  if ('updateSnapshots' in config && config.updateSnapshots !== undefined) {
-    if (typeof config.updateSnapshots !== 'string' || !['all', 'changed', 'missing', 'none'].includes(config.updateSnapshots))
-      throw errorWithFile(file, `config.updateSnapshots must be one of "all", "changed", "missing" or "none"`);
-  }
-
-  if ('tsconfig' in config && config.tsconfig !== undefined) {
-    if (typeof config.tsconfig !== 'string')
-      throw errorWithFile(file, `config.tsconfig must be a string`);
+  // tsconfig file existence check (type validation is in schema)
+  if (config.tsconfig && typeof config.tsconfig === 'string') {
     if (!fs.existsSync(path.resolve(file, '..', config.tsconfig)))
       throw errorWithFile(file, `config.tsconfig does not exist`);
   }
@@ -336,31 +259,7 @@ function validateProject(file: string, project: Project, title: string) {
   if (typeof project !== 'object' || !project)
     throw errorWithFile(file, `${title} must be an object`);
 
-  if ('name' in project && project.name !== undefined) {
-    if (typeof project.name !== 'string')
-      throw errorWithFile(file, `${title}.name must be a string`);
-  }
-
-  if ('outputDir' in project && project.outputDir !== undefined) {
-    if (typeof project.outputDir !== 'string')
-      throw errorWithFile(file, `${title}.outputDir must be a string`);
-  }
-
-  if ('repeatEach' in project && project.repeatEach !== undefined) {
-    if (typeof project.repeatEach !== 'number' || project.repeatEach < 0)
-      throw errorWithFile(file, `${title}.repeatEach must be a non-negative number`);
-  }
-
-  if ('retries' in project && project.retries !== undefined) {
-    if (typeof project.retries !== 'number' || project.retries < 0)
-      throw errorWithFile(file, `${title}.retries must be a non-negative number`);
-  }
-
-  if ('testDir' in project && project.testDir !== undefined) {
-    if (typeof project.testDir !== 'string')
-      throw errorWithFile(file, `${title}.testDir must be a string`);
-  }
-
+  // testIgnore/testMatch validation (complex string|RegExp|array type)
   for (const prop of ['testIgnore', 'testMatch'] as const) {
     if (prop in project && project[prop] !== undefined) {
       const value = project[prop];
@@ -375,26 +274,61 @@ function validateProject(file: string, project: Project, title: string) {
     }
   }
 
-  if ('timeout' in project && project.timeout !== undefined) {
-    if (typeof project.timeout !== 'number' || project.timeout < 0)
-      throw errorWithFile(file, `${title}.timeout must be a non-negative number`);
-  }
-
+  // Validate test options in project.use
   if ('use' in project && project.use !== undefined) {
     if (!project.use || typeof project.use !== 'object')
       throw errorWithFile(file, `${title}.use must be an object`);
+    validateTestOptions(file, project.use, `${title}.use`);
   }
+}
 
-  if ('ignoreSnapshots' in project && project.ignoreSnapshots !== undefined) {
-    if (typeof project.ignoreSnapshots !== 'boolean')
-      throw errorWithFile(file, `${title}.ignoreSnapshots must be a boolean`);
-  }
+function validateTestOptions(file: string, use: Record<string, any>, title: string) {
+  try {
+    testOptionsSchema.parse(use);
+  } catch (error) {
+    const zodError = error as ZodError;
+    if (zodError.issues.length > 0) {
+      const issue = zodError.issues[0];
+      const path = issue.path.join('.');
+      const fullPath = path ? `${title}.${path}` : title;
 
-  if ('workers' in project && project.workers !== undefined) {
-    if (typeof project.workers === 'number' && project.workers <= 0)
-      throw errorWithFile(file, `${title}.workers must be a positive number`);
-    else if (typeof project.workers === 'string' && !project.workers.endsWith('%'))
-      throw errorWithFile(file, `${title}.workers must be a number or percentage`);
+      if (issue.code === 'invalid_type') {
+        let receivedValue: any = undefined;
+        if (issue.path.length > 0) {
+          let current: any = use;
+          for (const key of issue.path)
+            current = current[key];
+
+          receivedValue = current;
+        }
+        const message = issue.message.replace('Invalid input: ', '');
+        throw errorWithFile(file,
+            `Configuration option "${fullPath}" ${message}\n` +
+          `Received: ${JSON.stringify(receivedValue)}`
+        );
+      }
+
+      if (issue.code === 'invalid_value') {
+        const receivedValue = issue.path.length > 0 ? use[path] : undefined;
+        throw errorWithFile(file,
+            `Configuration option "${fullPath}" ${issue.message}\n` +
+          `Received: ${JSON.stringify(receivedValue)}`
+        );
+      }
+
+      if (issue.code === 'too_small' || issue.code === 'too_big') {
+        const receivedValue = issue.path.length > 0 ? use[path] : undefined;
+        throw errorWithFile(file,
+            `Configuration option "${fullPath}" ${issue.message}\n` +
+          `Received: ${JSON.stringify(receivedValue)}`
+        );
+      }
+
+      throw errorWithFile(file,
+          `Configuration option "${fullPath}" ${issue.message}`
+      );
+    }
+    throw error;
   }
 }
 

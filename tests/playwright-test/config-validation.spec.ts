@@ -491,3 +491,192 @@ test.describe('config validation - error messages', () => {
     expect(result.output).toContain('invalid');
   });
 });
+
+test.describe('test options validation - viewport', () => {
+  test('should accept valid viewport', async ({ runInlineTest }) => {
+    const result = await runInlineTest({
+      'playwright.config.ts': `
+        export default {
+          use: {
+            viewport: { width: 1280, height: 720 },
+          },
+        };
+      `,
+      'test.spec.ts': `
+        import { test, expect } from '@playwright/test';
+        test('example', () => {})
+      `,
+    });
+    expect(result.exitCode).toBe(0);
+  });
+
+  test('should reject invalid viewport width', async ({ runInlineTest }) => {
+    const result = await runInlineTest({
+      'playwright.config.ts': `
+        export default {
+          use: {
+            viewport: { width: -100, height: 720 },
+          },
+        };
+      `,
+      'test.spec.ts': `
+        import { test, expect } from '@playwright/test';
+        test('example', () => {})
+      `,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain('viewport');
+    expect(result.output).toContain('width');
+  });
+
+  test('should accept null viewport', async ({ runInlineTest }) => {
+    const result = await runInlineTest({
+      'playwright.config.ts': `
+        export default {
+          use: {
+            viewport: null,
+          },
+        };
+      `,
+      'test.spec.ts': `
+        import { test, expect } from '@playwright/test';
+        test('example', () => {})
+      `,
+    });
+    expect(result.exitCode).toBe(0);
+  });
+});
+
+test.describe('test options validation - browser options', () => {
+  test('should accept valid browserName', async ({ runInlineTest }) => {
+    for (const browser of ['chromium', 'firefox', 'webkit']) {
+      const result = await runInlineTest({
+        'playwright.config.ts': `
+          export default {
+            use: {
+              browserName: '${browser}',
+            },
+          };
+        `,
+        'test.spec.ts': `
+          import { test, expect } from '@playwright/test';
+          test('example', () => {})
+        `,
+      });
+      expect(result.exitCode).toBe(0);
+    }
+  });
+
+  test('should reject invalid browserName', async ({ runInlineTest }) => {
+    const result = await runInlineTest({
+      'playwright.config.ts': `
+        export default {
+          use: {
+            browserName: 'chrome',
+          },
+        };
+      `,
+      'test.spec.ts': `
+        import { test, expect } from '@playwright/test';
+        test('example', () => {})
+      `,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain('browserName');
+  });
+
+  test('should accept headless boolean', async ({ runInlineTest }) => {
+    const result = await runInlineTest({
+      'playwright.config.ts': `
+        export default {
+          use: {
+            headless: true,
+          },
+        };
+      `,
+      'test.spec.ts': `
+        import { test, expect } from '@playwright/test';
+        test('example', () => {})
+      `,
+    });
+    expect(result.exitCode).toBe(0);
+  });
+});
+
+test.describe('test options validation - screenshot', () => {
+  test('should accept valid screenshot mode', async ({ runInlineTest }) => {
+    for (const mode of ['on', 'off', 'only-on-failure']) {
+      const result = await runInlineTest({
+        'playwright.config.ts': `
+          export default {
+            use: {
+              screenshot: '${mode}',
+            },
+          };
+        `,
+        'test.spec.ts': `
+          import { test, expect } from '@playwright/test';
+          test('example', () => {})
+        `,
+      });
+      expect(result.exitCode).toBe(0);
+    }
+  });
+
+  test('should reject invalid screenshot mode', async ({ runInlineTest }) => {
+    const result = await runInlineTest({
+      'playwright.config.ts': `
+        export default {
+          use: {
+            screenshot: 'always',
+          },
+        };
+      `,
+      'test.spec.ts': `
+        import { test, expect } from '@playwright/test';
+        test('example', () => {})
+      `,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain('screenshot');
+  });
+});
+
+test.describe('test options validation - custom fixtures allowed', () => {
+  test('should allow custom fixture options', async ({ runInlineTest }) => {
+    const result = await runInlineTest({
+      'playwright.config.ts': `
+        export default {
+          use: {
+            myCustomFixture: 'value',
+            anotherFixture: 123,
+          },
+        };
+      `,
+      'test.spec.ts': `
+        import { test, expect } from '@playwright/test';
+        test('example', () => {})
+      `,
+    });
+    expect(result.exitCode).toBe(0);
+  });
+
+  test('should validate known options even with custom fixtures', async ({ runInlineTest }) => {
+    const result = await runInlineTest({
+      'playwright.config.ts': `
+        export default {
+          use: {
+            myCustomFixture: 'value',
+            headless: 'yes',  // Invalid - should be boolean
+          },
+        };
+      `,
+      'test.spec.ts': `
+        import { test, expect } from '@playwright/test';
+        test('example', () => {})
+      `,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain('headless');
+  });
+});

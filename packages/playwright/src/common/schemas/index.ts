@@ -26,5 +26,8 @@ export * from './base';
 // Export config schemas
 export * from './config';
 
+// Export test options schema
+export * from './testOptions';
+
 // Re-export Zod for convenience
 export { z as zod } from 'playwright-core/lib/mcpBundle';
