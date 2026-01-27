@@ -361,7 +361,7 @@ export const testConfigSchema = zod.object({
    */
   ignoreSnapshots: zod.boolean().optional(),
 
-}).strict(); // Catch typos in config property names
+}).loose(); // Allow unknown props for backward compatibility
 
 // Note: Type export can be added later if needed
 // export type TestConfig = zod.infer<typeof testConfigSchema>;

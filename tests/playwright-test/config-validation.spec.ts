@@ -384,12 +384,14 @@ test.describe('config validation - expect configuration', () => {
   });
 });
 
-test.describe('config validation - strict mode (typos)', () => {
-  test('should reject unknown property (typo)', async ({ runInlineTest }) => {
+test.describe('config validation - backward compatibility', () => {
+  test('should allow unknown properties for backward compatibility', async ({ runInlineTest }) => {
+    // allows custom/ props in config for extensibility
     const result = await runInlineTest({
       'playwright.config.ts': `
         export default {
-          tiemout: 30000,  // Typo: should be 'timeout'
+          customProperty: 'value',
+          myCustomSetting: 123,
         };
       `,
       'test.spec.ts': `
@@ -397,9 +399,7 @@ test.describe('config validation - strict mode (typos)', () => {
         test('example', () => {})
       `,
     });
-    expect(result.exitCode).toBe(1);
-    expect(result.output).toContain('tiemout');
-    expect(result.output).toContain('not recognized');
+    expect(result.exitCode).toBe(0);
   });
 
   test('should allow all known properties', async ({ runInlineTest }) => {
