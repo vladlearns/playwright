@@ -24,7 +24,6 @@ import fs from 'fs';
 import net from 'net';
 import os from 'os';
 import path from 'path';
-import { debug } from 'playwright-core/lib/utilsBundle';
 import { SocketConnection } from './socketConnection';
 
 import type { Section } from '../browser/response';
@@ -34,8 +33,6 @@ export type StructuredResponse = {
   text?: string;
   sections: Section[];
 };
-
-const debugCli = debug('pw:cli');
 
 class Session {
   readonly name: string;
@@ -66,10 +63,11 @@ class Session {
       method,
       params,
     };
-    await this._connection.send(message);
-    return new Promise<any>((resolve, reject) => {
+    const responsePromise = new Promise<any>((resolve, reject) => {
       this._callbacks.set(messageId, { resolve, reject });
     });
+    const [result] = await Promise.all([responsePromise, this._connection.send(message)]);
+    return result;
   }
 
   close() {
@@ -104,22 +102,22 @@ class SessionManager {
     this._options = options;
   }
 
-  async list(): Promise<{ name: string, live: boolean }[]> {
+  async list(): Promise<Map<string, boolean>> {
     const dir = daemonProfilesDir;
     try {
       const files = await fs.promises.readdir(dir);
-      const sessions: { name: string, live: boolean }[] = [];
+      const sessions = new Map<string, boolean>();
       for (const file of files) {
         if (file.startsWith('ud-')) {
           // Session is like ud-<sessionName>-browserName
           const sessionName = file.split('-')[1];
           const live = await this._canConnect(sessionName);
-          sessions.push({ name: sessionName, live });
+          sessions.set(sessionName, live);
         }
       }
       return sessions;
     } catch {
-      return [];
+      return new Map<string, boolean>();
     }
   }
 
@@ -186,16 +184,23 @@ class SessionManager {
     }
   }
 
+  async configure(args: any): Promise<void> {
+    const sessionName = this._resolveSessionName(args.session);
+
+    if (await this._canConnect(sessionName)) {
+      const session = await this._connect(sessionName);
+      await session.stop();
+    }
+
+    this._options.config = args._[1];
+    const session = await this._connect(sessionName);
+    session.close();
+  }
+
   private async _connect(sessionName: string): Promise<Session> {
     const socketPath = this._daemonSocketPath(sessionName);
-    debugCli(`Connecting to daemon at ${socketPath}`);
 
-    const socketExists = await fs.promises.stat(socketPath)
-        .then(stat => stat?.isSocket() ?? false)
-        .catch(() => false);
-
-    if (socketExists) {
-      debugCli(`Socket file exists, attempting to connect...`);
+    if (await this._canConnect(sessionName)) {
       try {
         return await this._connectToSocket(sessionName, socketPath);
       } catch (e) {
@@ -208,7 +213,6 @@ class SessionManager {
     await fs.promises.mkdir(daemonProfilesDir, { recursive: true });
     const userDataDir = path.resolve(daemonProfilesDir, `ud-${sessionName}`);
     const cliPath = path.join(__dirname, '../../../cli.js');
-    debugCli(`Will launch daemon process: ${cliPath}`);
     const configFile = resolveConfigFile(this._options.config);
     const configArg = configFile !== undefined ? [`--config=${configFile}`] : [];
     const headedArg = this._options.headed ? [`--daemon-headed`] : [];
@@ -234,7 +238,7 @@ class SessionManager {
 
     console.log(`<!-- Daemon for \`${sessionName}\` session started with pid ${child.pid}.`);
     if (configFile)
-      console.log(`- Using config file at \`${configFile}\`.`);
+      console.log(`- Using config file at \`${path.relative(process.cwd(), configFile)}\`.`);
     const sessionSuffix = sessionName !== 'default' ? ` "${sessionName}"` : '';
     console.log(`- You can stop the session daemon with \`playwright-cli session-stop${sessionSuffix}\` when done.`);
     console.log(`- You can delete the session data with \`playwright-cli session-delete${sessionSuffix}\` when done.`);
@@ -250,7 +254,6 @@ class SessionManager {
       } catch (e) {
         if (e.code !== 'ENOENT')
           throw e;
-        debugCli(`Retrying to connect to daemon at ${socketPath} (${i + 1}/${maxRetries})`);
       }
     }
 
@@ -268,7 +271,6 @@ class SessionManager {
   private async _connectToSocket(sessionName: string, socketPath: string): Promise<Session> {
     const socket = await new Promise<net.Socket>((resolve, reject) => {
       const socket = net.createConnection(socketPath, () => {
-        debugCli(`Connected to daemon at ${socketPath}`);
         resolve(socket);
       });
       socket.on('error', reject);
@@ -306,17 +308,15 @@ class SessionManager {
   }
 }
 
-async function handleSessionCommand(sessionManager: SessionManager, args: any): Promise<void> {
-  const subcommand = args._[0].split('-').slice(1).join('-');
-
+async function handleSessionCommand(sessionManager: SessionManager, subcommand: string, args: any): Promise<void> {
   if (subcommand === 'list') {
     const sessions = await sessionManager.list();
     console.log('Sessions:');
-    for (const session of sessions) {
-      const liveMarker = session.live ? ' (live)' : '';
-      console.log(`  ${session.name}${liveMarker}`);
+    for (const [sessionName, live] of sessions.entries()) {
+      const liveMarker = live ? ' (live)' : '';
+      console.log(`  ${sessionName}${liveMarker}`);
     }
-    if (sessions.length === 0)
+    if (sessions.size === 0)
       console.log('  (no sessions)');
     return;
   }
@@ -328,13 +328,18 @@ async function handleSessionCommand(sessionManager: SessionManager, args: any): 
 
   if (subcommand === 'stop-all') {
     const sessions = await sessionManager.list();
-    for (const session of sessions)
-      await sessionManager.stop(session.name);
+    for (const sessionName of sessions.keys())
+      await sessionManager.stop(sessionName);
     return;
   }
 
   if (subcommand === 'delete') {
     await sessionManager.delete(args._[1]);
+    return;
+  }
+
+  if (subcommand === 'config') {
+    await sessionManager.configure(args);
     return;
   }
 
@@ -398,7 +403,13 @@ export async function program(options: { version: string }) {
 
   const sessionManager = new SessionManager(args);
   if (commandName.startsWith('session')) {
-    await handleSessionCommand(sessionManager, args);
+    const subcommand = args._[0].split('-').slice(1).join('-');
+    await handleSessionCommand(sessionManager, subcommand, args);
+    return;
+  }
+
+  if (commandName === 'config') {
+    await handleSessionCommand(sessionManager, 'config', args);
     return;
   }
 
