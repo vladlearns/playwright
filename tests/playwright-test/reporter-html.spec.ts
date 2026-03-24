@@ -20,7 +20,7 @@ import url from 'url';
 import { test as baseTest, expect as baseExpect, createImage } from './playwright-test-fixtures';
 import type { HttpServer } from '../../packages/playwright-core/lib/server/utils/httpServer';
 import { startHtmlReportServer } from '../../packages/playwright/lib/reporters/html';
-import { msToString } from '../../packages/web/src/uiUtils';
+import { msToString } from '../../packages/playwright-core/src/utils/isomorphic/formatUtils';
 const { spawnAsync } = require('../../packages/playwright-core/lib/utils');
 
 const test = baseTest.extend<{ showReport: (reportFolder?: string) => Promise<void> }>({
@@ -652,7 +652,7 @@ for (const useIntermediateMergeReport of [true, false] as const) {
       await page.getByRole('link', { name: 'passes' }).click();
       await page.click('img');
       await expect(page.locator('.progress-dialog')).toBeHidden();
-      await expect(page.locator('.workbench-loader > .header > .title')).toHaveText('a.test.js:3 › passes');
+      await expect(page.locator('.workbench-loader > .workbench-loader-header > .title')).toHaveText('a.test.js:3 › passes');
     });
 
     test('should show multi trace source', async ({ runInlineTest, page, server, showReport }) => {
@@ -3122,6 +3122,43 @@ for (const useIntermediateMergeReport of [true, false] as const) {
       await expect(page.getByTestId('test-snippet')).not.toBeVisible();
     });
 
+    test('worker test list', async ({ runInlineTest, showReport, page }) => {
+      const result = await runInlineTest({
+        'playwright.config.ts': `
+          export default { reporter: [['html']], retries: 1 }
+        `,
+        'example.spec.ts': `
+          import { test, expect } from '@playwright/test';
+          test('success1', () => {});
+          test('flaky1', () => {
+            expect(test.info().retry).toBe(1);
+          });
+          test('success2', () => {});
+        `,
+      }, { reporter: 'html', workers: '1' }, { PLAYWRIGHT_HTML_OPEN: 'never' });
+      expect(result.exitCode).toBe(0);
+      await showReport();
+
+      await page.getByRole('link', { name: 'flaky1', exact: true }).click();
+
+      await page.getByRole('button', { name: 'Executed in Worker #0' }).click();
+      await expect(page.getByTestId('worker-test-list')).toMatchAriaSnapshot(`
+        - 'button "Executed in Worker #0" [expanded]'
+        - region:
+          - list:
+            - listitem:
+              - link "success1"
+              - link "example.spec.ts:3"
+            - listitem:
+              - link "flaky1"
+              - link "example.spec.ts:4"
+      `);
+      await expect(page.getByRole('listitem').filter({ hasText: 'flaky1' })).toHaveAttribute('aria-current', 'true');
+
+      await page.getByRole('link', { name: 'success1', exact: true }).click();
+      await expect(page.locator('.test-case-location')).toHaveText('example.spec.ts:3');
+    });
+
     test('should support keyboard shortcuts', async ({ runInlineTest, showReport, page }) => {
       await runInlineTest({
         'playwright.config.ts': `
@@ -3243,18 +3280,25 @@ for (const useIntermediateMergeReport of [true, false] as const) {
         await expect(page.getByRole('main')).toMatchAriaSnapshot(`
           - button "Slowest Tests"
           - region:
-            - link "three"
-            - text: /foo/
-            - link "two"
-            - text: /foo/
-            - link "one"
-            - text: /foo/
-            - link "three"
-            - text: /bar/
-            - link "two"
-            - text: /bar/
-            - link "one"
-            - text: /bar/
+            - list:
+              - listitem:
+                - link "three"
+                - text: /foo/
+              - listitem:
+                - link "two"
+                - text: /foo/
+              - listitem:
+                - link "one"
+                - text: /foo/
+              - listitem:
+                - link "three"
+                - text: /bar/
+              - listitem:
+                - link "two"
+                - text: /bar/
+              - listitem:
+                - link "one"
+                - text: /bar/
         `);
         await page.getByText('foo').first().click();
         await expect(page.getByRole('main')).toMatchAriaSnapshot(`
@@ -3306,54 +3350,6 @@ for (const useIntermediateMergeReport of [true, false] as const) {
         await expect(page.getByRole('link', { name: 'previous' })).not.toBeVisible();
       });
     });
-
-
-    test('shard chart', async ({ runInlineTest, writeFiles, showReport, page }) => {
-      test.skip(!useIntermediateMergeReport);
-
-      await writeFiles({
-        'playwright.config.ts': `
-          module.exports = {
-            fullyParallel: true,
-            tag: process.env.BOT_TAG,
-          };
-        `,
-        'a.test.js': `
-          import { test, expect } from '@playwright/test';
-          import timers from 'timers/promises';
-          test('one', async () => {
-            await timers.setTimeout(100);
-          });
-          test('two', async () => {
-            await timers.setTimeout(200);
-          });
-          test('three', async () => {
-            await timers.setTimeout(300);
-          });
-        `,
-      });
-
-      await runInlineTest({}, { reporter: 'dot,html', shard: '1/3',  }, { PLAYWRIGHT_HTML_OPEN: 'never', PWTEST_BLOB_DO_NOT_REMOVE: '1', BOT_TAG: '@linux' });
-      await runInlineTest({}, { reporter: 'dot,html', shard: '2/3',  }, { PLAYWRIGHT_HTML_OPEN: 'never', PWTEST_BLOB_DO_NOT_REMOVE: '1', BOT_TAG: '@linux' });
-      await runInlineTest({}, { reporter: 'dot,html', shard: '3/3',  }, { PLAYWRIGHT_HTML_OPEN: 'never', PWTEST_BLOB_DO_NOT_REMOVE: '1', BOT_TAG: '@linux' });
-
-      await runInlineTest({}, { reporter: 'dot,html', shard: '1/2',  }, { PLAYWRIGHT_HTML_OPEN: 'never', PWTEST_BLOB_DO_NOT_REMOVE: '1', BOT_TAG: '@mac' });
-      await runInlineTest({}, { reporter: 'dot,html', shard: '2/2',  }, { PLAYWRIGHT_HTML_OPEN: 'never', PWTEST_BLOB_DO_NOT_REMOVE: '1', BOT_TAG: '@mac' });
-
-      await showReport();
-      await page.getByRole('link', { name: 'Speedboard' }).click();
-
-      await expect(page.getByRole('main')).toMatchAriaSnapshot(`
-        - button "Timeline"
-        - region:
-          - img:
-            - listitem /@linux/
-            - listitem /@linux/
-            - listitem /@linux/
-            - listitem /@mac/
-            - listitem /@mac/
-      `);
-    });
   });
 }
 
@@ -3382,14 +3378,19 @@ test('should support merge files option', async ({ runInlineTest, showReport, pa
   await expect(page.locator('body')).toMatchAriaSnapshot(`
     - button "<anonymous>" [expanded]
     - region:
-      - link "test 2"
-      - link "a.test.js:6"
+      - list:
+        - listitem:
+          - link "test 2"
+          - link "a.test.js:6"
     - button "describe" [expanded]
     - region:
-      - link "test 1"
-      - link "a.test.js:4"
-      - link "test 3"
-      - link "b.test.js:4"
+      - list:
+        - listitem:
+          - link "test 1"
+          - link "a.test.js:4"
+        - listitem:
+          - link "test 3"
+          - link "b.test.js:4"
   `);
 });
 

@@ -21,6 +21,8 @@ import path from 'path';
 
 import { program } from 'playwright-core/lib/cli/program';
 import { gracefullyProcessExitDoNotHang, startProfiling, stopProfiling } from 'playwright-core/lib/utils';
+import * as tools from 'playwright-core/lib/tools/exports';
+import { setupExitWatchdog } from 'playwright-core/lib/tools/exports';
 
 import { builtInReporters, defaultReporter, defaultTimeout } from './common/config';
 import { loadConfigFromFile, loadEmptyConfigForMergeReports, resolveConfigLocation } from './common/configLoader';
@@ -33,10 +35,7 @@ import * as testServer from './runner/testServer';
 import { runWatchModeLoop } from './runner/watchMode';
 import { runAllTestsWithConfig, TestRunner } from './runner/testRunner';
 import { createErrorCollectingReporter } from './runner/reporters';
-import * as mcp from './mcp/sdk/exports';
-import { TestServerBackend } from './mcp/test/testBackend';
-import { decorateCommand } from './mcp/program';
-import { setupExitWatchdog } from './mcp/browser/watchdog';
+import { TestServerBackend, testServerBackendTools } from './mcp/test/testBackend';
 import { ClaudeGenerator, OpencodeGenerator, VSCodeGenerator, CopilotGenerator } from './agents/generateAgents';
 
 import type { ConfigCLIOverrides } from './common/ipc';
@@ -147,12 +146,6 @@ Examples:
   $ npx playwright merge-reports playwright-report`);
 }
 
-function addBrowserMCPServerCommand(program: Command) {
-  const command = program.command('run-mcp-server', { hidden: true });
-  command.description('Interact with the browser over MCP');
-  decorateCommand(command, packageJSON.version);
-}
-
 function addTestMCPServerCommand(program: Command) {
   const command = program.command('run-test-mcp-server', { hidden: true });
   command.description('Interact with the test runner over MCP');
@@ -162,14 +155,16 @@ function addTestMCPServerCommand(program: Command) {
   command.option('--port <port>', 'port to listen on for SSE transport.');
   command.action(async options => {
     setupExitWatchdog();
-    const factory: mcp.ServerBackendFactory = {
+    const factory: tools.ServerBackendFactory = {
       name: 'Playwright Test Runner',
       nameInConfig: 'playwright-test-runner',
       version: packageJSON.version,
-      create: () => new TestServerBackend(options.config, { muteConsole: options.port === undefined, headless: options.headless }),
+      toolSchemas: testServerBackendTools.map(tool => tool.schema),
+      create: async () => new TestServerBackend(options.config, { muteConsole: options.port === undefined, headless: options.headless }),
+      disposed: async () => { }
     };
     // TODO: add all options from mcp.startHttpServer.
-    await mcp.start(factory, { port: options.port === undefined ? undefined : +options.port, host: options.host });
+    await tools.start(factory, { port: options.port === undefined ? undefined : +options.port, host: options.host });
   });
 }
 
@@ -288,13 +283,20 @@ async function mergeReports(reportDir: string | undefined, opts: { [key: string]
 }
 
 function overridesFromOptions(options: { [key: string]: any }): ConfigCLIOverrides {
+  if (options.ui) {
+    options.debug = undefined;
+    options.trace = undefined;
+  }
+
   const overrides: ConfigCLIOverrides = {
+    debug: options.debug,
     failOnFlakyTests: options.failOnFlakyTests ? true : undefined,
     forbidOnly: options.forbidOnly ? true : undefined,
     fullyParallel: options.fullyParallel ? true : undefined,
     globalTimeout: options.globalTimeout ? parseInt(options.globalTimeout, 10) : undefined,
     maxFailures: options.x ? 1 : (options.maxFailures ? parseInt(options.maxFailures, 10) : undefined),
     outputDir: options.output ? path.resolve(process.cwd(), options.output) : undefined,
+    pause: !!process.env.PWPAUSE,
     quiet: options.quiet ? options.quiet : undefined,
     repeatEach: options.repeatEach ? parseInt(options.repeatEach, 10) : undefined,
     retries: options.retries ? parseInt(options.retries, 10) : undefined,
@@ -306,9 +308,10 @@ function overridesFromOptions(options: { [key: string]: any }): ConfigCLIOverrid
     ignoreSnapshots: options.ignoreSnapshots ? !!options.ignoreSnapshots : undefined,
     updateSnapshots: options.updateSnapshots,
     updateSourceMethod: options.updateSourceMethod,
-    runAgents: options.runAgents,
+    use: {
+      trace: options.trace,
+    },
     workers: options.workers,
-    pause: process.env.PWPAUSE ? true : undefined,
   };
 
   if (options.browser) {
@@ -324,15 +327,11 @@ function overridesFromOptions(options: { [key: string]: any }): ConfigCLIOverrid
     });
   }
 
-  if (options.headed || options.debug || overrides.pause)
-    overrides.use = { headless: false };
-  if (!options.ui && options.debug) {
-    overrides.debug = true;
+  if (options.headed)
+    overrides.use.headless = false;
+  if (options.debug === 'inspector') {
+    overrides.use.headless = false;
     process.env.PWDEBUG = '1';
-  }
-  if (!options.ui && options.trace) {
-    overrides.use = overrides.use || {};
-    overrides.use.trace = options.trace;
   }
   if (overrides.tsconfig && !fs.existsSync(overrides.tsconfig))
     throw new Error(`--tsconfig "${options.tsconfig}" does not exist`);
@@ -396,14 +395,14 @@ function resolveReporter(id: string) {
   return require.resolve(id, { paths: [process.cwd()] });
 }
 
-const kTraceModes: TraceMode[] = ['on', 'off', 'on-first-retry', 'on-all-retries', 'retain-on-failure', 'retain-on-first-failure'];
+const kTraceModes: TraceMode[] = ['on', 'off', 'on-first-retry', 'on-all-retries', 'retain-on-failure', 'retain-on-first-failure', 'retain-on-failure-and-retries'];
 
 // Note: update docs/src/test-cli-js.md when you update this, program is the source of truth.
 
 const testOptions: [string, { description: string, choices?: string[], preset?: string }][] = [
   /* deprecated */ ['--browser <browser>', { description: `Browser to use for tests, one of "all", "chromium", "firefox" or "webkit" (default: "chromium")` }],
   ['-c, --config <file>', { description: `Configuration file, or a test directory with optional "playwright.config.{m,c}?{js,ts}"` }],
-  ['--debug', { description: `Run tests with Playwright Inspector. Shortcut for "PWDEBUG=1" environment variable and "--timeout=0 --max-failures=1 --headed --workers=1" options` }],
+  ['--debug [mode]', { description: `Run tests with Playwright Inspector. Shortcut for "PWDEBUG=1" environment variable and "--timeout=0 --max-failures=1 --headed --workers=1" options`, choices: ['inspector', 'cli'], preset: 'inspector' }],
   ['--fail-on-flaky-tests', { description: `Fail if any test is flagged as flaky (default: false)` }],
   ['--forbid-only', { description: `Fail if test.only is called (default: false)` }],
   ['--fully-parallel', { description: `Run all tests in parallel (default: false)` }],
@@ -444,7 +443,6 @@ addTestCommand(program);
 addShowReportCommand(program);
 addMergeReportsCommand(program);
 addClearCacheCommand(program);
-addBrowserMCPServerCommand(program);
 addTestMCPServerCommand(program);
 addDevServerCommand(program);
 addTestServerCommand(program);

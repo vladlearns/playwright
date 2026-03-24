@@ -97,6 +97,16 @@ scheme.SelectorEngine = tObject({
   source: tString,
   contentScript: tOptional(tBoolean),
 });
+scheme.URLPattern = tObject({
+  hash: tString,
+  hostname: tString,
+  password: tString,
+  pathname: tString,
+  port: tString,
+  protocol: tString,
+  search: tString,
+  username: tString,
+});
 scheme.SetNetworkCookie = tObject({
   name: tString,
   value: tString,
@@ -242,6 +252,7 @@ scheme.APIResponse = tObject({
   headers: tArray(tType('NameValue')),
 });
 scheme.LifecycleEvent = tEnum(['load', 'domcontentloaded', 'networkidle', 'commit']);
+scheme.ConsoleMessagesFilter = tEnum(['all', 'since-navigation']);
 scheme.LocalUtilsInitializer = tObject({
   deviceDescriptors: tArray(tObject({
     name: tString,
@@ -268,6 +279,7 @@ scheme.LocalUtilsZipParams = tObject({
   stacksId: tOptional(tString),
   mode: tEnum(['write', 'append']),
   includeSources: tBoolean,
+  additionalSources: tOptional(tArray(tString)),
 });
 scheme.LocalUtilsZipResult = tOptional(tObject({}));
 scheme.LocalUtilsHarOpenParams = tObject({
@@ -303,7 +315,7 @@ scheme.LocalUtilsHarUnzipParams = tObject({
 });
 scheme.LocalUtilsHarUnzipResult = tOptional(tObject({}));
 scheme.LocalUtilsConnectParams = tObject({
-  wsEndpoint: tString,
+  endpoint: tString,
   headers: tOptional(tAny),
   exposeNetwork: tOptional(tString),
   slowMo: tOptional(tFloat),
@@ -514,6 +526,7 @@ scheme.BrowserTypeLaunchParams = tObject({
   })),
   downloadsPath: tOptional(tString),
   tracesDir: tOptional(tString),
+  artifactsDir: tOptional(tString),
   chromiumSandbox: tOptional(tBoolean),
   firefoxUserPrefs: tOptional(tAny),
   cdpPort: tOptional(tInt),
@@ -543,6 +556,7 @@ scheme.BrowserTypeLaunchPersistentContextParams = tObject({
   })),
   downloadsPath: tOptional(tString),
   tracesDir: tOptional(tString),
+  artifactsDir: tOptional(tString),
   chromiumSandbox: tOptional(tBoolean),
   firefoxUserPrefs: tOptional(tAny),
   cdpPort: tOptional(tInt),
@@ -597,6 +611,9 @@ scheme.BrowserTypeLaunchPersistentContextParams = tObject({
       width: tInt,
       height: tInt,
     })),
+    annotate: tOptional(tObject({
+      delay: tOptional(tInt),
+    })),
   })),
   strictSelectors: tOptional(tBoolean),
   serviceWorkers: tOptional(tEnum(['allow', 'block'])),
@@ -620,14 +637,32 @@ scheme.BrowserTypeConnectOverCDPResult = tObject({
   browser: tChannel(['Browser']),
   defaultContext: tOptional(tChannel(['BrowserContext'])),
 });
+scheme.BrowserTypeConnectOverCDPTransportParams = tObject({
+  transport: tBinary,
+});
+scheme.BrowserTypeConnectOverCDPTransportResult = tObject({
+  browser: tChannel(['Browser']),
+  defaultContext: tOptional(tChannel(['BrowserContext'])),
+});
 scheme.BrowserInitializer = tObject({
   version: tString,
   name: tString,
+  browserName: tEnum(['chromium', 'firefox', 'webkit']),
 });
 scheme.BrowserContextEvent = tObject({
   context: tChannel(['BrowserContext']),
 });
 scheme.BrowserCloseEvent = tOptional(tObject({}));
+scheme.BrowserStartServerParams = tObject({
+  title: tString,
+  workspaceDir: tOptional(tString),
+  metadata: tOptional(tAny),
+});
+scheme.BrowserStartServerResult = tObject({
+  pipeName: tString,
+});
+scheme.BrowserStopServerParams = tOptional(tObject({}));
+scheme.BrowserStopServerResult = tOptional(tObject({}));
 scheme.BrowserCloseParams = tObject({
   reason: tOptional(tString),
 });
@@ -689,6 +724,9 @@ scheme.BrowserNewContextParams = tObject({
     size: tOptional(tObject({
       width: tInt,
       height: tInt,
+    })),
+    annotate: tOptional(tObject({
+      delay: tOptional(tInt),
     })),
   })),
   strictSelectors: tOptional(tBoolean),
@@ -761,6 +799,9 @@ scheme.BrowserNewContextForReuseParams = tObject({
       width: tInt,
       height: tInt,
     })),
+    annotate: tOptional(tObject({
+      delay: tOptional(tInt),
+    })),
   })),
   strictSelectors: tOptional(tBoolean),
   serviceWorkers: tOptional(tEnum(['allow', 'block'])),
@@ -812,19 +853,19 @@ scheme.BrowserContextWaitForEventInfoParams = tType('EventTargetWaitForEventInfo
 scheme.PageWaitForEventInfoParams = tType('EventTargetWaitForEventInfoParams');
 scheme.WorkerWaitForEventInfoParams = tType('EventTargetWaitForEventInfoParams');
 scheme.WebSocketWaitForEventInfoParams = tType('EventTargetWaitForEventInfoParams');
+scheme.DebuggerWaitForEventInfoParams = tType('EventTargetWaitForEventInfoParams');
 scheme.ElectronApplicationWaitForEventInfoParams = tType('EventTargetWaitForEventInfoParams');
 scheme.AndroidDeviceWaitForEventInfoParams = tType('EventTargetWaitForEventInfoParams');
-scheme.PageAgentWaitForEventInfoParams = tType('EventTargetWaitForEventInfoParams');
 scheme.EventTargetWaitForEventInfoResult = tOptional(tObject({}));
 scheme.BrowserContextWaitForEventInfoResult = tType('EventTargetWaitForEventInfoResult');
 scheme.PageWaitForEventInfoResult = tType('EventTargetWaitForEventInfoResult');
 scheme.WorkerWaitForEventInfoResult = tType('EventTargetWaitForEventInfoResult');
 scheme.WebSocketWaitForEventInfoResult = tType('EventTargetWaitForEventInfoResult');
+scheme.DebuggerWaitForEventInfoResult = tType('EventTargetWaitForEventInfoResult');
 scheme.ElectronApplicationWaitForEventInfoResult = tType('EventTargetWaitForEventInfoResult');
 scheme.AndroidDeviceWaitForEventInfoResult = tType('EventTargetWaitForEventInfoResult');
-scheme.PageAgentWaitForEventInfoResult = tType('EventTargetWaitForEventInfoResult');
 scheme.BrowserContextInitializer = tObject({
-  isChromium: tBoolean,
+  debugger: tChannel(['Debugger']),
   requestContext: tChannel(['APIRequestContext']),
   tracing: tChannel(['Tracing']),
   options: tObject({
@@ -879,6 +920,9 @@ scheme.BrowserContextInitializer = tObject({
         width: tInt,
         height: tInt,
       })),
+      annotate: tOptional(tObject({
+        delay: tOptional(tInt),
+      })),
     })),
     strictSelectors: tOptional(tBoolean),
     serviceWorkers: tOptional(tEnum(['allow', 'block'])),
@@ -898,6 +942,7 @@ scheme.BrowserContextConsoleEvent = tObject({
     lineNumber: tInt,
     columnNumber: tInt,
   }),
+  timestamp: tFloat,
   page: tOptional(tChannel(['Page'])),
   worker: tOptional(tChannel(['Worker'])),
 });
@@ -917,9 +962,6 @@ scheme.BrowserContextRouteEvent = tObject({
 });
 scheme.BrowserContextWebSocketRouteEvent = tObject({
   webSocketRoute: tChannel(['WebSocketRoute']),
-});
-scheme.BrowserContextVideoEvent = tObject({
-  artifact: tChannel(['Artifact']),
 });
 scheme.BrowserContextServiceWorkerEvent = tObject({
   worker: tChannel(['Worker']),
@@ -957,7 +999,9 @@ scheme.BrowserContextAddCookiesResult = tOptional(tObject({}));
 scheme.BrowserContextAddInitScriptParams = tObject({
   source: tString,
 });
-scheme.BrowserContextAddInitScriptResult = tOptional(tObject({}));
+scheme.BrowserContextAddInitScriptResult = tObject({
+  disposable: tChannel(['Disposable']),
+});
 scheme.BrowserContextClearCookiesParams = tObject({
   name: tOptional(tString),
   nameRegexSource: tOptional(tString),
@@ -986,7 +1030,9 @@ scheme.BrowserContextExposeBindingParams = tObject({
   name: tString,
   needsHandle: tOptional(tBoolean),
 });
-scheme.BrowserContextExposeBindingResult = tOptional(tObject({}));
+scheme.BrowserContextExposeBindingResult = tObject({
+  disposable: tChannel(['Disposable']),
+});
 scheme.BrowserContextGrantPermissionsParams = tObject({
   permissions: tArray(tString),
   origin: tOptional(tString),
@@ -1029,6 +1075,7 @@ scheme.BrowserContextSetNetworkInterceptionPatternsParams = tObject({
     glob: tOptional(tString),
     regexSource: tOptional(tString),
     regexFlags: tOptional(tString),
+    urlPattern: tOptional(tType('URLPattern')),
   })),
 });
 scheme.BrowserContextSetNetworkInterceptionPatternsResult = tOptional(tObject({}));
@@ -1037,6 +1084,7 @@ scheme.BrowserContextSetWebSocketInterceptionPatternsParams = tObject({
     glob: tOptional(tString),
     regexSource: tOptional(tString),
     regexFlags: tOptional(tString),
+    urlPattern: tOptional(tType('URLPattern')),
   })),
 });
 scheme.BrowserContextSetWebSocketInterceptionPatternsResult = tOptional(tObject({}));
@@ -1155,6 +1203,7 @@ scheme.PageInitializer = tObject({
   })),
   isClosed: tBoolean,
   opener: tOptional(tChannel(['Page'])),
+  video: tOptional(tChannel(['Artifact'])),
 });
 scheme.PageBindingCallEvent = tObject({
   binding: tChannel(['BindingCall']),
@@ -1188,11 +1237,11 @@ scheme.PageLocatorHandlerTriggeredEvent = tObject({
 scheme.PageRouteEvent = tObject({
   route: tChannel(['Route']),
 });
+scheme.PageScreencastFrameEvent = tObject({
+  data: tBinary,
+});
 scheme.PageWebSocketRouteEvent = tObject({
   webSocketRoute: tChannel(['WebSocketRoute']),
-});
-scheme.PageVideoEvent = tObject({
-  artifact: tChannel(['Artifact']),
 });
 scheme.PageWebSocketEvent = tObject({
   webSocket: tChannel(['WebSocket']),
@@ -1203,13 +1252,19 @@ scheme.PageWorkerEvent = tObject({
 scheme.PageAddInitScriptParams = tObject({
   source: tString,
 });
-scheme.PageAddInitScriptResult = tOptional(tObject({}));
+scheme.PageAddInitScriptResult = tObject({
+  disposable: tChannel(['Disposable']),
+});
 scheme.PageCloseParams = tObject({
   runBeforeUnload: tOptional(tBoolean),
   reason: tOptional(tString),
 });
 scheme.PageCloseResult = tOptional(tObject({}));
-scheme.PageConsoleMessagesParams = tOptional(tObject({}));
+scheme.PageClearConsoleMessagesParams = tOptional(tObject({}));
+scheme.PageClearConsoleMessagesResult = tOptional(tObject({}));
+scheme.PageConsoleMessagesParams = tObject({
+  filter: tOptional(tType('ConsoleMessagesFilter')),
+});
 scheme.PageConsoleMessagesResult = tObject({
   messages: tArray(tObject({
     type: tString,
@@ -1220,6 +1275,7 @@ scheme.PageConsoleMessagesResult = tObject({
       lineNumber: tInt,
       columnNumber: tInt,
     }),
+    timestamp: tFloat,
   })),
 });
 scheme.PageEmulateMediaParams = tObject({
@@ -1234,7 +1290,9 @@ scheme.PageExposeBindingParams = tObject({
   name: tString,
   needsHandle: tOptional(tBoolean),
 });
-scheme.PageExposeBindingResult = tOptional(tObject({}));
+scheme.PageExposeBindingResult = tObject({
+  disposable: tChannel(['Disposable']),
+});
 scheme.PageGoBackParams = tObject({
   timeout: tFloat,
   waitUntil: tOptional(tType('LifecycleEvent')),
@@ -1336,6 +1394,7 @@ scheme.PageSetNetworkInterceptionPatternsParams = tObject({
     glob: tOptional(tString),
     regexSource: tOptional(tString),
     regexFlags: tOptional(tString),
+    urlPattern: tOptional(tType('URLPattern')),
   })),
 });
 scheme.PageSetNetworkInterceptionPatternsResult = tOptional(tObject({}));
@@ -1344,6 +1403,7 @@ scheme.PageSetWebSocketInterceptionPatternsParams = tObject({
     glob: tOptional(tString),
     regexSource: tOptional(tString),
     regexFlags: tOptional(tString),
+    urlPattern: tOptional(tType('URLPattern')),
   })),
 });
 scheme.PageSetWebSocketInterceptionPatternsResult = tOptional(tObject({}));
@@ -1410,7 +1470,11 @@ scheme.PageTouchscreenTapParams = tObject({
   y: tFloat,
 });
 scheme.PageTouchscreenTapResult = tOptional(tObject({}));
-scheme.PagePageErrorsParams = tOptional(tObject({}));
+scheme.PageClearPageErrorsParams = tOptional(tObject({}));
+scheme.PageClearPageErrorsResult = tOptional(tObject({}));
+scheme.PagePageErrorsParams = tObject({
+  filter: tOptional(tType('ConsoleMessagesFilter')),
+});
 scheme.PagePageErrorsResult = tObject({
   errors: tArray(tType('SerializedError')),
 });
@@ -1441,14 +1505,6 @@ scheme.PagePdfResult = tObject({
 scheme.PageRequestsParams = tOptional(tObject({}));
 scheme.PageRequestsResult = tObject({
   requests: tArray(tChannel(['Request'])),
-});
-scheme.PageSnapshotForAIParams = tObject({
-  track: tOptional(tString),
-  timeout: tFloat,
-});
-scheme.PageSnapshotForAIResult = tObject({
-  full: tString,
-  incremental: tOptional(tString),
 });
 scheme.PageStartJSCoverageParams = tObject({
   resetOnNavigation: tOptional(tBoolean),
@@ -1489,13 +1545,36 @@ scheme.PageStopCSSCoverageResult = tObject({
 });
 scheme.PageBringToFrontParams = tOptional(tObject({}));
 scheme.PageBringToFrontResult = tOptional(tObject({}));
+scheme.PagePickLocatorParams = tOptional(tObject({}));
+scheme.PagePickLocatorResult = tObject({
+  selector: tString,
+});
+scheme.PageCancelPickLocatorParams = tOptional(tObject({}));
+scheme.PageCancelPickLocatorResult = tOptional(tObject({}));
+scheme.PageStartScreencastParams = tObject({
+  preferredSize: tOptional(tObject({
+    width: tInt,
+    height: tInt,
+  })),
+  annotate: tOptional(tObject({
+    delay: tOptional(tInt),
+  })),
+});
+scheme.PageStartScreencastResult = tOptional(tObject({}));
+scheme.PageStopScreencastParams = tOptional(tObject({}));
+scheme.PageStopScreencastResult = tOptional(tObject({}));
 scheme.PageVideoStartParams = tObject({
   size: tOptional(tObject({
     width: tInt,
     height: tInt,
   })),
+  annotate: tOptional(tObject({
+    delay: tOptional(tInt),
+  })),
 });
-scheme.PageVideoStartResult = tOptional(tObject({}));
+scheme.PageVideoStartResult = tObject({
+  artifact: tChannel(['Artifact']),
+});
 scheme.PageVideoStopParams = tOptional(tObject({}));
 scheme.PageVideoStopResult = tOptional(tObject({}));
 scheme.PageUpdateSubscriptionParams = tObject({
@@ -1503,25 +1582,10 @@ scheme.PageUpdateSubscriptionParams = tObject({
   enabled: tBoolean,
 });
 scheme.PageUpdateSubscriptionResult = tOptional(tObject({}));
-scheme.PageAgentParams = tObject({
-  api: tOptional(tString),
-  apiKey: tOptional(tString),
-  apiEndpoint: tOptional(tString),
-  apiTimeout: tOptional(tInt),
-  apiCacheFile: tOptional(tString),
-  cacheFile: tOptional(tString),
-  cacheOutFile: tOptional(tString),
-  doNotRenderActive: tOptional(tBoolean),
-  maxActions: tOptional(tInt),
-  maxActionRetries: tOptional(tInt),
-  maxTokens: tOptional(tInt),
-  model: tOptional(tString),
-  secrets: tOptional(tArray(tType('NameValue'))),
-  systemPrompt: tOptional(tString),
+scheme.PageSetDockTileParams = tObject({
+  image: tBinary,
 });
-scheme.PageAgentResult = tObject({
-  agent: tChannel(['PageAgent']),
-});
+scheme.PageSetDockTileResult = tOptional(tObject({}));
 scheme.FrameInitializer = tObject({
   url: tString,
   name: tString,
@@ -1575,7 +1639,10 @@ scheme.FrameAddStyleTagResult = tObject({
   element: tChannel(['ElementHandle']),
 });
 scheme.FrameAriaSnapshotParams = tObject({
-  selector: tString,
+  mode: tOptional(tEnum(['ai', 'default'])),
+  track: tOptional(tString),
+  selector: tOptional(tString),
+  depth: tOptional(tInt),
   timeout: tFloat,
 });
 scheme.FrameAriaSnapshotResult = tObject({
@@ -1961,6 +2028,9 @@ scheme.WorkerUpdateSubscriptionParams = tObject({
   enabled: tBoolean,
 });
 scheme.WorkerUpdateSubscriptionResult = tOptional(tObject({}));
+scheme.DisposableInitializer = tOptional(tObject({}));
+scheme.DisposableDisposeParams = tOptional(tObject({}));
+scheme.DisposableDisposeResult = tOptional(tObject({}));
 scheme.JSHandleInitializer = tObject({
   preview: tString,
 });
@@ -2266,9 +2336,7 @@ scheme.RequestInitializer = tObject({
   headers: tArray(tType('NameValue')),
   isNavigationRequest: tBoolean,
   redirectedFrom: tOptional(tChannel(['Request'])),
-  hasResponse: tBoolean,
 });
-scheme.RequestResponseEvent = tOptional(tObject({}));
 scheme.RequestResponseParams = tOptional(tObject({}));
 scheme.RequestResponseResult = tObject({
   response: tOptional(tChannel(['Response'])),
@@ -2386,6 +2454,10 @@ scheme.ResponseRawResponseHeadersParams = tOptional(tObject({}));
 scheme.ResponseRawResponseHeadersResult = tObject({
   headers: tArray(tType('NameValue')),
 });
+scheme.ResponseHttpVersionParams = tOptional(tObject({}));
+scheme.ResponseHttpVersionResult = tObject({
+  value: tString,
+});
 scheme.ResponseSizesParams = tOptional(tObject({}));
 scheme.ResponseSizesResult = tObject({
   sizes: tType('RequestSizes'),
@@ -2437,6 +2509,31 @@ scheme.BindingCallResolveParams = tObject({
   result: tType('SerializedArgument'),
 });
 scheme.BindingCallResolveResult = tOptional(tObject({}));
+scheme.DebuggerInitializer = tOptional(tObject({}));
+scheme.DebuggerPausedStateChangedEvent = tObject({
+  pausedDetails: tArray(tObject({
+    location: tObject({
+      file: tString,
+      line: tOptional(tInt),
+      column: tOptional(tInt),
+    }),
+    title: tString,
+  })),
+});
+scheme.DebuggerPauseParams = tOptional(tObject({}));
+scheme.DebuggerPauseResult = tOptional(tObject({}));
+scheme.DebuggerResumeParams = tOptional(tObject({}));
+scheme.DebuggerResumeResult = tOptional(tObject({}));
+scheme.DebuggerNextParams = tOptional(tObject({}));
+scheme.DebuggerNextResult = tOptional(tObject({}));
+scheme.DebuggerRunToParams = tObject({
+  location: tObject({
+    file: tString,
+    line: tOptional(tInt),
+    column: tOptional(tInt),
+  }),
+});
+scheme.DebuggerRunToResult = tOptional(tObject({}));
 scheme.DialogInitializer = tObject({
   page: tOptional(tChannel(['Page'])),
   type: tString,
@@ -2532,6 +2629,7 @@ scheme.CDPSessionEventEvent = tObject({
   method: tString,
   params: tOptional(tAny),
 });
+scheme.CDPSessionCloseEvent = tOptional(tObject({}));
 scheme.CDPSessionSendParams = tObject({
   method: tString,
   params: tOptional(tAny),
@@ -2545,6 +2643,7 @@ scheme.ElectronInitializer = tOptional(tObject({}));
 scheme.ElectronLaunchParams = tObject({
   executablePath: tOptional(tString),
   args: tOptional(tArray(tString)),
+  chromiumSandbox: tOptional(tBoolean),
   cwd: tOptional(tString),
   env: tOptional(tArray(tType('NameValue'))),
   timeout: tFloat,
@@ -2571,6 +2670,9 @@ scheme.ElectronLaunchParams = tObject({
       width: tInt,
       height: tInt,
     })),
+    annotate: tOptional(tObject({
+      delay: tOptional(tInt),
+    })),
   })),
   strictSelectors: tOptional(tBoolean),
   timezoneId: tOptional(tString),
@@ -2594,6 +2696,7 @@ scheme.ElectronApplicationConsoleEvent = tObject({
     lineNumber: tInt,
     columnNumber: tInt,
   }),
+  timestamp: tFloat,
 });
 scheme.ElectronApplicationBrowserWindowParams = tObject({
   page: tChannel(['Page']),
@@ -2805,6 +2908,9 @@ scheme.AndroidDeviceLaunchBrowserParams = tObject({
       width: tInt,
       height: tInt,
     })),
+    annotate: tOptional(tObject({
+      delay: tOptional(tInt),
+    })),
   })),
   strictSelectors: tOptional(tBoolean),
   serviceWorkers: tOptional(tEnum(['allow', 'block'])),
@@ -2913,60 +3019,3 @@ scheme.JsonPipeSendParams = tObject({
 scheme.JsonPipeSendResult = tOptional(tObject({}));
 scheme.JsonPipeCloseParams = tOptional(tObject({}));
 scheme.JsonPipeCloseResult = tOptional(tObject({}));
-scheme.PageAgentInitializer = tObject({
-  page: tChannel(['Page']),
-});
-scheme.PageAgentTurnEvent = tObject({
-  role: tString,
-  message: tString,
-  usage: tOptional(tObject({
-    inputTokens: tInt,
-    outputTokens: tInt,
-  })),
-});
-scheme.PageAgentPerformParams = tObject({
-  task: tString,
-  maxActions: tOptional(tInt),
-  maxActionRetries: tOptional(tInt),
-  maxTokens: tOptional(tInt),
-  cacheKey: tOptional(tString),
-  timeout: tOptional(tInt),
-});
-scheme.PageAgentPerformResult = tObject({
-  usage: tType('AgentUsage'),
-});
-scheme.PageAgentExpectParams = tObject({
-  expectation: tString,
-  maxActions: tOptional(tInt),
-  maxActionRetries: tOptional(tInt),
-  maxTokens: tOptional(tInt),
-  cacheKey: tOptional(tString),
-  timeout: tOptional(tInt),
-});
-scheme.PageAgentExpectResult = tObject({
-  usage: tType('AgentUsage'),
-});
-scheme.PageAgentExtractParams = tObject({
-  query: tString,
-  schema: tAny,
-  maxActions: tOptional(tInt),
-  maxActionRetries: tOptional(tInt),
-  maxTokens: tOptional(tInt),
-  cacheKey: tOptional(tString),
-  timeout: tOptional(tInt),
-});
-scheme.PageAgentExtractResult = tObject({
-  result: tAny,
-  usage: tType('AgentUsage'),
-});
-scheme.PageAgentDisposeParams = tOptional(tObject({}));
-scheme.PageAgentDisposeResult = tOptional(tObject({}));
-scheme.PageAgentUsageParams = tOptional(tObject({}));
-scheme.PageAgentUsageResult = tObject({
-  usage: tType('AgentUsage'),
-});
-scheme.AgentUsage = tObject({
-  turns: tInt,
-  inputTokens: tInt,
-  outputTokens: tInt,
-});

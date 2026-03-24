@@ -43,17 +43,22 @@ export type PointerActionWaitOptions = CommonActionOptions & {
   trial?: boolean;
 };
 
+export type AnnotateOptions = {
+  delay?: number,
+};
+
 export type VideoOptions = {
   width: number,
   height: number,
   outputFile: string,
+  annotate?: AnnotateOptions,
 };
 
 export type ScreencastFrame = {
   buffer: Buffer,
   frameSwapWallTime: number,
-  width: number,
-  height: number,
+  viewportWidth: number,
+  viewportHeight: number,
 };
 
 export type Credentials = {

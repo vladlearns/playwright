@@ -14,10 +14,11 @@
   limitations under the License.
 */
 
-import type { HTMLReportOptions, TestAttachment, TestCase, TestResult, TestStep } from './types';
+import type { TestAttachment, TestCase, TestCaseSummary, TestResult, TestStep } from './types';
 import * as React from 'react';
 import { TreeItem } from './treeItem';
-import { formatUrl, msToString } from './utils';
+import { formatUrl } from './utils';
+import { msToString } from '@isomorphic/formatUtils';
 import { AutoChip } from './chip';
 import { traceImage } from './images';
 import { Anchor, AttachmentLink, generateTraceUrl, testResultHref, useSearchParams } from './links';
@@ -28,8 +29,9 @@ import { CodeSnippet, PromptButton, TestScreenshotErrorView } from './testErrorV
 import * as icons from './icons';
 import './testResultView.css';
 import { useAsyncMemo } from '@web/uiUtils';
-import { copyPrompt } from '@web/shared/prompts';
-import type { MetadataWithCommitInfo } from '@playwright/isomorphic/types';
+import type { LoadedReport } from './loadedReport';
+import { TestCaseListView } from './testFileView';
+import { stripAnsiEscapes } from '@isomorphic/stringUtils';
 
 interface ImageDiffWithAnchors extends ImageDiff {
   anchors: string[];
@@ -71,11 +73,10 @@ function groupImageDiffs(screenshots: Set<TestAttachment>, result: TestResult): 
 }
 
 export const TestResultView: React.FC<{
+  report: LoadedReport,
   test: TestCase,
   result: TestResult,
-  testRunMetadata: MetadataWithCommitInfo | undefined,
-  options?: HTMLReportOptions,
-}> = ({ test, result, testRunMetadata, options }) => {
+}> = ({ report, test, result }) => {
   const { screenshots, videos, traces, otherAttachments, diffs, errors, otherAttachmentAnchors, screenshotAnchors, errorContext } = React.useMemo(() => {
     const attachments = result.attachments.filter(a => !a.name.startsWith('_'));
     const screenshots = new Set(attachments.filter(a => a.contentType.startsWith('image/')));
@@ -92,27 +93,30 @@ export const TestResultView: React.FC<{
   }, [result]);
 
   const prompt = useAsyncMemo(async () => {
-    if (options?.noCopyPrompt)
+    if (report.json().options?.noCopyPrompt)
+      return undefined;
+    if (!errorContext)
+      return undefined;
+
+    let text = errorContext.path ? await fetch(errorContext.path).then(r => r.text()) : errorContext.body;
+    if (!text)
       return undefined;
 
     const stdoutAttachment = result.attachments.find(a => a.name === 'stdout');
     const stderrAttachment = result.attachments.find(a => a.name === 'stderr');
     const stdout = stdoutAttachment?.body && stdoutAttachment.contentType === 'text/plain' ? stdoutAttachment.body : undefined;
     const stderr = stderrAttachment?.body && stderrAttachment.contentType === 'text/plain' ? stderrAttachment.body : undefined;
+    if (stdout)
+      text += '\n\n# Stdout\n\n```\n' + stripAnsiEscapes(stdout) + '\n```';
+    if (stderr)
+      text += '\n\n# Stderr\n\n```\n' + stripAnsiEscapes(stderr) + '\n```';
 
-    return await copyPrompt({
-      testInfo: [
-        `- Name: ${test.path.join(' >> ')} >> ${test.title}`,
-        `- Location: ${test.location.file}:${test.location.line}:${test.location.column}`
-      ].join('\n'),
-      metadata: testRunMetadata,
-      errorContext: errorContext?.path ? await fetch(errorContext.path!).then(r => r.text()) : errorContext?.body,
-      errors: result.errors,
-      buildCodeFrame: async error => error.codeframe,
-      stdout,
-      stderr,
-    });
-  }, [test, errorContext, testRunMetadata, result], undefined);
+    const metadata = report.json().metadata;
+    if (metadata?.gitDiff)
+      text += '\n\n# Local changes\n\n```diff\n' + metadata.gitDiff + '\n```';
+
+    return text;
+  }, [errorContext, report, result], undefined);
 
   return <div className='test-result'>
     {!!errors.length && <AutoChip header='Errors'>
@@ -177,6 +181,16 @@ export const TestResultView: React.FC<{
         </Anchor>
       )}
     </AutoChip>}
+
+    <AutoChip header={`Executed in Worker #${result.workerIndex}`} dataTestId='worker-test-list' initialExpanded={false} noInsets={true} body={() => {
+      const list = buildWorkerLists(report).get(result.workerIndex) || { tests: [], runs: [] };
+      return <TestCaseListView
+        tests={list.tests}
+        runs={list.runs}
+        projectNames={report.json().projectNames}
+        selectedTestId={test.testId}
+      />;
+    }}/>
   </div>;
 };
 
@@ -216,3 +230,33 @@ const StepTreeItem: React.FC<{
     return snippet.concat(steps);
   } : undefined} depth={depth}/>;
 };
+
+type WorkerLists = Map<number, { tests: TestCaseSummary[], runs: number[] }>;
+const kWorkerListsSymbol = Symbol('workerLists');
+
+function buildWorkerLists(report: LoadedReport): WorkerLists {
+  let data: WorkerLists | undefined = (report as any)[kWorkerListsSymbol];
+  if (!data) {
+    const lists = new Map<number, { test: TestCaseSummary, time: number, run: number }[]>();
+    for (const file of report.json().files) {
+      for (const test of file.tests) {
+        for (let index = 0; index < test.results.length; index++) {
+          let list = lists.get(test.results[index].workerIndex);
+          if (!list) {
+            list = [];
+            lists.set(test.results[index].workerIndex, list);
+          }
+          list.push({ test, time: new Date(test.results[index].startTime).valueOf(), run: index });
+        }
+      }
+    }
+
+    data = new Map();
+    for (const [workerIndex, list] of lists) {
+      list.sort((a, b) => a.time - b.time);
+      data.set(workerIndex, { tests: list.map(t => t.test), runs: list.map(t => t.run) });
+    }
+    (report as any)[kWorkerListsSymbol] = data;
+  }
+  return data;
+}

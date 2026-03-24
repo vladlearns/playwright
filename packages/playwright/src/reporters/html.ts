@@ -28,7 +28,7 @@ import { CommonReporterOptions, formatError, formatResultFailure, internalScreen
 import { codeFrameColumns } from '../transform/babelBundle';
 import { resolveReporterOutputPath, stripAnsiEscapes } from '../util';
 
-import type { MachineEndResult, ReporterV2 } from './reporterV2';
+import type { ReportConfigureParams, ReportEndParams, ReporterV2 } from './reporterV2';
 import type { HtmlReporterOptions as HtmlReporterConfigOptions, Metadata, TestAnnotation } from '../../types/test';
 import type * as api from '../../types/testReporter';
 import type { HTMLReport, HTMLReportOptions, Location, Stats, TestAttachment, TestCase, TestCaseSummary, TestFile, TestFileSummary, TestResult, TestStep } from '@html-reporter/types';
@@ -47,6 +47,12 @@ const isHtmlReportOption = (type: string): type is HtmlReportOpenOption => {
   return htmlReportOptions.includes(type as HtmlReportOpenOption);
 };
 
+type MachineData = {
+  config: api.FullConfig;
+  result: api.FullResult;
+  reportPath: string;
+};
+
 class HtmlReporter implements ReporterV2 {
   private config!: api.FullConfig;
   private suite!: api.Suite;
@@ -58,7 +64,8 @@ class HtmlReporter implements ReporterV2 {
   private _host: string | undefined;
   private _buildResult: { ok: boolean, singleTestId: string | undefined } | undefined;
   private _topLevelErrors: api.TestError[] = [];
-  private _machines: MachineEndResult[] = [];
+  private _reportConfigs = new Map<string, api.FullConfig>();
+  private _machines: MachineData[] = [];
 
   constructor(options: HtmlReporterConfigOptions & CommonReporterOptions) {
     this._options = options;
@@ -122,8 +129,14 @@ class HtmlReporter implements ReporterV2 {
     this._topLevelErrors.push(error);
   }
 
-  onMachineEnd(result: MachineEndResult): void {
-    this._machines.push(result);
+  onReportConfigure(params: ReportConfigureParams): void {
+    this._reportConfigs.set(params.reportPath, params.config);
+  }
+
+  onReportEnd(params: ReportEndParams): void {
+    const config = this._reportConfigs.get(params.reportPath);
+    if (config)
+      this._machines.push({ config, result: params.result, reportPath: params.reportPath });
   }
 
   async onEnd(result: api.FullResult) {
@@ -155,7 +168,8 @@ class HtmlReporter implements ReporterV2 {
     if (process.env.CI || !this._buildResult)
       return;
     const { ok, singleTestId } = this._buildResult;
-    const shouldOpen = !!process.stdin.isTTY && (this._open === 'always' || (!ok && this._open === 'on-failure'));
+    const isCodingAgent = !!process.env.CLAUDECODE || !!process.env.COPILOT_CLI;
+    const shouldOpen = !isCodingAgent && !!process.stdin.isTTY && (this._open === 'always' || (!ok && this._open === 'on-failure'));
     if (shouldOpen) {
       await showHTMLReport(this._outputFolder, this._host, this._port, singleTestId);
     } else if (this._options._mode === 'test' && !!process.stdin.isTTY) {
@@ -255,7 +269,7 @@ class HtmlBuilder {
     this._attachmentsBaseURL = attachmentsBaseURL;
   }
 
-  async build(metadata: Metadata, projectSuites: api.Suite[], result: api.FullResult, topLevelErrors: api.TestError[], machines: MachineEndResult[]): Promise<{ ok: boolean, singleTestId: string | undefined }> {
+  async build(metadata: Metadata, projectSuites: api.Suite[], result: api.FullResult, topLevelErrors: api.TestError[], machines: MachineData[]): Promise<{ ok: boolean, singleTestId: string | undefined }> {
     const data: DataMap = new Map();
     for (const projectSuite of projectSuites) {
       const projectName = projectSuite.project()!.name;
@@ -303,11 +317,11 @@ class HtmlBuilder {
       stats: { ...[...data.values()].reduce((a, e) => addStats(a, e.testFileSummary.stats), emptyStats()) },
       errors: topLevelErrors.map(error => formatError(internalScreen, error).message),
       options: this._options,
-      machines: machines.map(s => ({
-        duration: s.duration,
-        startTime: s.startTime.getTime(),
-        tag: s.tag,
-        shardIndex: s.shardIndex,
+      machines: machines.map(machine => ({
+        duration: machine.result.duration,
+        startTime: machine.result.startTime.getTime(),
+        tag: machine.config.tags,
+        shardIndex: machine.config.shard?.current,
       })),
     };
     htmlReport.files.sort((f1, f2) => {
@@ -430,7 +444,11 @@ class HtmlBuilder {
         path,
         ok: test.outcome() === 'expected' || test.outcome() === 'flaky',
         results: results.map(result => {
-          return { attachments: result.attachments.map(a => ({ name: a.name, contentType: a.contentType, path: a.path })) };
+          return {
+            attachments: result.attachments.map(a => ({ name: a.name, contentType: a.contentType, path: a.path })),
+            startTime: result.startTime,
+            workerIndex: result.workerIndex,
+          };
         }),
       },
     };
@@ -539,6 +557,7 @@ class HtmlBuilder {
         ...result.attachments,
         ...result.stdout.map(m => stdioAttachment(m, 'stdout')),
         ...result.stderr.map(m => stdioAttachment(m, 'stderr'))]),
+      workerIndex: result.workerIndex,
     };
   }
 

@@ -19,7 +19,7 @@ import os from 'os';
 import path from 'path';
 
 import { Snapshotter } from './snapshotter';
-import { methodMetainfo } from '../../../utils/isomorphic/protocolMetainfo';
+import { getMetainfo } from '../../../utils/isomorphic/protocolMetainfo';
 import { assert } from '../../../utils/isomorphic/assert';
 import { monotonicTime } from '../../../utils/isomorphic/time';
 import { eventsHelper  } from '../../utils/eventsHelper';
@@ -49,6 +49,8 @@ import type * as har from '@trace/har';
 import type { FrameSnapshot } from '@trace/snapshot';
 import type * as trace from '@trace/trace';
 import type { Progress } from '@protocol/progress';
+import type * as types from '../../types';
+import type { ScreencastListener } from '../../screencast';
 
 const version: trace.VERSION = 8;
 
@@ -74,13 +76,12 @@ type RecordingState = {
   groupStack: string[];
 };
 
-const kScreencastOptions = { width: 800, height: 600, quality: 90 };
-
 export class Tracing extends SdkObject implements InstrumentationListener, SnapshotterDelegate, HarTracerDelegate {
   private _fs = new SerializedFS();
   private _snapshotter?: Snapshotter;
   private _harTracer: HarTracer;
   private _screencastListeners: RegisteredListener[] = [];
+  private _pageScreencastListeners = new Map<Page, ScreencastListener>();
   private _eventListeners: RegisteredListener[] = [];
   private _context: BrowserContext | APIRequestContext;
   // Note: state should only be touched inside API methods, but not inside trace operations.
@@ -280,8 +281,13 @@ export class Tracing extends SdkObject implements InstrumentationListener, Snaps
     eventsHelper.removeEventListeners(this._screencastListeners);
     if (!(this._context instanceof BrowserContext))
       return;
-    for (const page of this._context.pages())
-      page.screencast.setOptions(null);
+    for (const page of this._context.pages()) {
+      const listener = this._pageScreencastListeners.get(page);
+      if (listener) {
+        page.screencast.stopForTracing(listener);
+        this._pageScreencastListeners.delete(page);
+      }
+    }
   }
 
   private _allocateNewTraceFile(state: RecordingState) {
@@ -429,8 +435,19 @@ export class Tracing extends SdkObject implements InstrumentationListener, Snaps
     await this._snapshotter?.captureSnapshot(sdkObject.attribution.page, metadata.id, snapshotName).catch(() => {});
   }
 
-  private _shouldCaptureSnapshot(sdkObject: SdkObject, metadata: CallMetadata) {
-    return !!this._snapshotter?.started() && shouldCaptureSnapshot(metadata) && !!sdkObject.attribution.page;
+  private _shouldCaptureSnapshot(sdkObject: SdkObject, metadata: CallMetadata, phase: 'before' | 'after' | 'input') {
+    if (!sdkObject.attribution.page || !this._snapshotter?.started())
+      return;
+
+    const metainfo = getMetainfo(metadata);
+    if (!metainfo?.snapshot)
+      return false;
+
+    switch (phase) {
+      case 'before': return !metainfo.input || !!metainfo.isAutoWaiting;
+      case 'input': return !!metainfo.input;
+      case 'after': return true;
+    }
   }
 
   onBeforeCall(sdkObject: SdkObject, metadata: CallMetadata, parentId?: string) {
@@ -439,7 +456,7 @@ export class Tracing extends SdkObject implements InstrumentationListener, Snaps
     if (!event)
       return Promise.resolve();
     sdkObject.attribution.page?.screencast.temporarilyDisableThrottling();
-    if (this._shouldCaptureSnapshot(sdkObject, metadata))
+    if (this._shouldCaptureSnapshot(sdkObject, metadata, 'before'))
       event.beforeSnapshot = `before@${metadata.id}`;
     this._state?.callIds.add(metadata.id);
     this._appendTraceEvent(event);
@@ -454,7 +471,7 @@ export class Tracing extends SdkObject implements InstrumentationListener, Snaps
     if (!event)
       return Promise.resolve();
     sdkObject.attribution.page?.screencast.temporarilyDisableThrottling();
-    if (this._shouldCaptureSnapshot(sdkObject, metadata))
+    if (this._shouldCaptureSnapshot(sdkObject, metadata, 'input'))
       event.inputSnapshot = `input@${metadata.id}`;
     this._appendTraceEvent(event);
     return this._captureSnapshot(event.inputSnapshot, sdkObject, metadata);
@@ -481,7 +498,7 @@ export class Tracing extends SdkObject implements InstrumentationListener, Snaps
     if (!event)
       return Promise.resolve();
     sdkObject.attribution.page?.screencast.temporarilyDisableThrottling();
-    if (this._shouldCaptureSnapshot(sdkObject, metadata))
+    if (this._shouldCaptureSnapshot(sdkObject, metadata, 'after'))
       event.afterSnapshot = `after@${metadata.id}`;
     this._appendTraceEvent(event);
     return this._captureSnapshot(event.afterSnapshot, sdkObject, metadata);
@@ -592,26 +609,25 @@ export class Tracing extends SdkObject implements InstrumentationListener, Snaps
   }
 
   private _startScreencastInPage(page: Page) {
-    page.screencast.setOptions(kScreencastOptions);
     const prefix = page.guid;
-    this._screencastListeners.push(
-        eventsHelper.addEventListener(page, Page.Events.ScreencastFrame, params => {
-          const suffix = params.timestamp || Date.now();
-          const sha1 = `${prefix}-${suffix}.jpeg`;
-          const event: trace.ScreencastFrameTraceEvent = {
-            type: 'screencast-frame',
-            pageId: page.guid,
-            sha1,
-            width: params.width,
-            height: params.height,
-            timestamp: monotonicTime(),
-            frameSwapWallTime: params.frameSwapWallTime,
-          };
-          // Make sure to write the screencast frame before adding a reference to it.
-          this._appendResource(sha1, params.buffer);
-          this._appendTraceEvent(event);
-        }),
-    );
+    const listener = (params: types.ScreencastFrame) => {
+      const suffix = Date.now();
+      const sha1 = `${prefix}-${suffix}.jpeg`;
+      const event: trace.ScreencastFrameTraceEvent = {
+        type: 'screencast-frame',
+        pageId: page.guid,
+        sha1,
+        width: params.viewportWidth,
+        height: params.viewportHeight,
+        timestamp: monotonicTime(),
+        frameSwapWallTime: params.frameSwapWallTime,
+      };
+      // Make sure to write the screencast frame before adding a reference to it.
+      this._appendResource(sha1, params.buffer);
+      this._appendTraceEvent(event);
+    };
+    this._pageScreencastListeners.set(page, listener);
+    page.screencast.startForTracing(listener);
   }
 
   private _appendTraceEvent(event: trace.TraceEvent) {
@@ -652,11 +668,6 @@ function visitTraceEvent(object: any, sha1s: Set<string>): any {
     return result;
   }
   return object;
-}
-
-function shouldCaptureSnapshot(metadata: CallMetadata): boolean {
-  const metainfo = methodMetainfo.get(metadata.type + '.' + metadata.method);
-  return !!metainfo?.snapshot;
 }
 
 function createBeforeActionTraceEvent(metadata: CallMetadata, parentId?: string): trace.BeforeActionTraceEvent | null {

@@ -15,12 +15,12 @@
  * limitations under the License.
  */
 
-import type { APIRequestContext, Browser, BrowserContext, BrowserContextOptions, Page, PageAgent, LaunchOptions, ViewportSize, Geolocation, HTTPCredentials, Locator, APIResponse, PageScreenshotOptions } from 'playwright-core';
+import type { APIRequestContext, Browser, BrowserContext, BrowserContextOptions, Page, LaunchOptions, ViewportSize, Geolocation, HTTPCredentials, Locator, APIResponse, PageScreenshotOptions } from 'playwright-core';
 export * from 'playwright-core';
 
 export type BlobReporterOptions = { outputDir?: string, fileName?: string };
 export type ListReporterOptions = { printSteps?: boolean };
-export type JUnitReporterOptions = { outputFile?: string, stripANSIControlSequences?: boolean, includeProjectInTestName?: boolean };
+export type JUnitReporterOptions = { outputFile?: string, stripANSIControlSequences?: boolean, includeProjectInTestName?: boolean, includeRetries?: boolean };
 export type JsonReporterOptions = { outputFile?: string };
 export type HtmlReporterOptions = {
   outputFolder?: string;
@@ -250,6 +250,13 @@ interface TestProject<TestArgs = {}, WorkerArgs = {}> {
        * for details.
        */
       pathTemplate?: string;
+
+      /**
+       * Controls how children of the snapshot root are matched against the actual accessibility tree. This is equivalent to
+       * adding a `/children` property at the top of every aria snapshot template. Individual snapshots can override this by
+       * including an explicit `/children` property.
+       */
+      children?: "contain"|"equal"|"deep-equal";
     };
 
     /**
@@ -1181,6 +1188,13 @@ interface TestConfig<TestArgs = {}, WorkerArgs = {}> {
        * for details.
        */
       pathTemplate?: string;
+
+      /**
+       * Controls how children of the snapshot root are matched against the actual accessibility tree. This is equivalent to
+       * adding a `/children` property at the top of every aria snapshot template. Individual snapshots can override this by
+       * including an explicit `/children` property.
+       */
+      children?: "contain"|"equal"|"deep-equal";
     };
 
     /**
@@ -1615,14 +1629,6 @@ interface TestConfig<TestArgs = {}, WorkerArgs = {}> {
    *
    */
   retries?: number;
-
-  /**
-   * Whether to run LLM agent for [PageAgent](https://playwright.dev/docs/api/class-pageagent):
-   * - "all" disregards existing cache and performs all actions via LLM
-   * - "missing" only performs actions that don't have generated cache actions
-   * - "none" does not talk to LLM at all, relies on the cached actions (default)
-   */
-  runAgents?: "all"|"missing"|"none";
 
   /**
    * Shard tests and execute only the selected shard. Specify in the one-based form like `{ total: 5, current: 2 }`.
@@ -2079,14 +2085,6 @@ export interface FullConfig<TestArgs = {}, WorkerArgs = {}> {
    * Base directory for all relative paths used in the reporters.
    */
   rootDir: string;
-
-  /**
-   * Whether to run LLM agent for [PageAgent](https://playwright.dev/docs/api/class-pageagent):
-   * - "all" disregards existing cache and performs all actions via LLM
-   * - "missing" only performs actions that don't have generated cache actions
-   * - "none" does not talk to LLM at all, relies on the cached actions (default)
-   */
-  runAgents: "all"|"missing"|"none";
 
   /**
    * See [testConfig.shard](https://playwright.dev/docs/api/class-testconfig#test-config-shard).
@@ -6903,6 +6901,7 @@ export interface PlaywrightWorkerOptions {
    * - `'retain-on-failure'`: Record trace for each test. When test run passes, remove the recorded trace.
    * - `'retain-on-first-failure'`: Record trace for the first run of each test, but not for retries. When test run
    *   passes, remove the recorded trace.
+   * - `'retain-on-failure-and-retries'`: Record trace for each test run. Retains all traces when an attempt fails.
    *
    * For more control, pass an object that specifies `mode` and trace features to enable.
    *
@@ -6934,6 +6933,9 @@ export interface PlaywrightWorkerOptions {
    * down to fit into 800x800. If `viewport` is not configured explicitly the video size defaults to 800x450. Actual
    * picture of each page will be scaled down if necessary to fit the specified size.
    *
+   * To annotate actions in the video with element highlights and action title subtitles, pass `annotate` with an
+   * optional `delay` in milliseconds (defaults to `500`).
+   *
    * **Usage**
    *
    * ```js
@@ -6949,31 +6951,12 @@ export interface PlaywrightWorkerOptions {
    *
    * Learn more about [recording video](https://playwright.dev/docs/test-use-options#recording-options).
    */
-  video: VideoMode | /** deprecated */ 'retry-with-video' | { mode: VideoMode, size?: ViewportSize };
+  video: VideoMode | /** deprecated */ 'retry-with-video' | { mode: VideoMode, size?: ViewportSize, annotate?: { delay?: number } };
 }
 
 export type ScreenshotMode = 'off' | 'on' | 'only-on-failure' | 'on-first-failure';
-export type TraceMode = 'off' | 'on' | 'retain-on-failure' | 'on-first-retry' | 'on-all-retries' | 'retain-on-first-failure';
+export type TraceMode = 'off' | 'on' | 'retain-on-failure' | 'on-first-retry' | 'on-all-retries' | 'retain-on-first-failure' | 'retain-on-failure-and-retries';
 export type VideoMode = 'off' | 'on' | 'retain-on-failure' | 'on-first-retry';
-export type AgentOptions = {
-  provider?: {
-    api: 'openai' | 'openai-compatible' | 'anthropic' | 'google';
-    apiEndpoint?: string;
-    apiKey: string;
-    apiTimeout?: number;
-    model: string;
-  },
-  limits?: {
-    maxTokens?: number;
-    maxActions?: number;
-    maxActionRetries?: number;
-  };
-  cachePathTemplate?: string;
-  runAgents?: 'all' | 'missing' | 'none';
-  secrets?: { [key: string]: string };
-  systemPrompt?: string;
-};
-
 /**
  * Playwright Test provides many options to configure test environment,
  * [Browser](https://playwright.dev/docs/api/class-browser),
@@ -7013,7 +6996,6 @@ export type AgentOptions = {
  *
  */
 export interface PlaywrightTestOptions {
-  agentOptions: AgentOptions | undefined;
   /**
    * Whether to automatically download all the attachments. Defaults to `true` where all the downloads are accepted.
    *
@@ -7723,7 +7705,6 @@ export interface PlaywrightTestArgs {
    *
    */
   request: APIRequestContext;
-  agent: PageAgent;
 }
 
 type ExcludeProps<A, B> = {
@@ -7734,6 +7715,9 @@ type CustomProperties<T> = ExcludeProps<T, PlaywrightTestOptions & PlaywrightWor
 export type PlaywrightTestProject<TestArgs = {}, WorkerArgs = {}> = Project<PlaywrightTestOptions & CustomProperties<TestArgs>, PlaywrightWorkerOptions & CustomProperties<WorkerArgs>>;
 export type PlaywrightTestConfig<TestArgs = {}, WorkerArgs = {}> = Config<PlaywrightTestOptions & CustomProperties<TestArgs>, PlaywrightWorkerOptions & CustomProperties<WorkerArgs>>;
 
+// Use the global URLPattern type if available (Node.js 22+, modern browsers),
+// otherwise fall back to `never` so it disappears from union types.
+type URLPattern = typeof globalThis extends { URLPattern: infer T } ? T : never;
 type AsymmetricMatcher = Record<string, any>;
 
 interface AsymmetricMatchers {
@@ -7921,7 +7905,11 @@ interface AsymmetricMatchers {
  */
 interface GenericAssertions<R> {
   /**
-   * Makes the assertion check for the opposite condition. For example, the following code passes:
+   * Makes the assertion check for the opposite condition.
+   *
+   * **Usage**
+   *
+   * For example, the following code passes:
    *
    * ```js
    * const value = 1;
@@ -7930,6 +7918,34 @@ interface GenericAssertions<R> {
    *
    */
   not: GenericAssertions<R>;
+  /**
+   * Use `resolves` to unwrap the value of a fulfilled promise so any other matcher can be chained. If the promise is
+   * rejected the assertion fails.
+   *
+   * For example, this code tests that the promise resolves and that the resulting value is `'lemon'`:
+   *
+   * ```js
+   * test('resolves to lemon', async () => {
+   *   await expect(Promise.resolve('lemon')).resolves.toBe('lemon');
+   * });
+   * ```
+   *
+   */
+  resolves: GenericAssertions<R>;
+  /**
+   * Use `.rejects` to unwrap the reason of a rejected promise so any other matcher can be chained. If the promise is
+   * fulfilled the assertion fails.
+   *
+   * For example, this code tests that the promise rejects with reason `'octopus'`:
+   *
+   * ```js
+   * test('rejects to octopus', async () => {
+   *   await expect(Promise.reject(new Error('octopus'))).rejects.toThrow('octopus');
+   * });
+   * ```
+   *
+   */
+  rejects: GenericAssertions<R>;
   /**
    * Compares value with
    * [`expected`](https://playwright.dev/docs/api/class-genericassertions#generic-assertions-to-be-option-expected) by
@@ -8583,8 +8599,11 @@ interface APIResponseAssertions {
   toBeOK(): Promise<void>;
 
   /**
-   * Makes the assertion check for the opposite condition. For example, this code tests that the response status is not
-   * successful:
+   * Makes the assertion check for the opposite condition.
+   *
+   * **Usage**
+   *
+   * For example, this code tests that the response status is not successful:
    *
    * ```js
    * await expect(response).not.toBeOK();
@@ -9615,8 +9634,11 @@ interface LocatorAssertions {
   }): Promise<void>;
 
   /**
-   * Makes the assertion check for the opposite condition. For example, this code tests that the Locator doesn't contain
-   * text `"error"`:
+   * Makes the assertion check for the opposite condition.
+   *
+   * **Usage**
+   *
+   * For example, this code tests that the Locator doesn't contain text `"error"`:
    *
    * ```js
    * await expect(locator).not.toContainText('error');
@@ -9704,6 +9726,9 @@ interface PageAssertions {
    * // Check for the page URL to contain 'doc', followed by an optional 's', followed by '/'
    * await expect(page).toHaveURL(/docs?\//);
    *
+   * // Check for the page URL to match the URL pattern
+   * await expect(page).toHaveURL(new URLPattern({ pathname: '/docs/*' }));
+   *
    * // Check for the predicate to be satisfied
    * // For example: verify query strings
    * await expect(page).toHaveURL(url => {
@@ -9719,7 +9744,7 @@ interface PageAssertions {
    * against the current browser URL.
    * @param options
    */
-  toHaveURL(url: string|RegExp|((url: URL) => boolean), options?: {
+  toHaveURL(url: string|RegExp|URLPattern|((url: URL) => boolean), options?: {
     /**
      * Whether to perform case-insensitive match.
      * [`ignoreCase`](https://playwright.dev/docs/api/class-pageassertions#page-assertions-to-have-url-option-ignore-case)
@@ -9735,8 +9760,11 @@ interface PageAssertions {
   }): Promise<void>;
 
   /**
-   * Makes the assertion check for the opposite condition. For example, this code tests that the page URL doesn't
-   * contain `"error"`:
+   * Makes the assertion check for the opposite condition.
+   *
+   * **Usage**
+   *
+   * For example, this code tests that the page URL doesn't contain `"error"`:
    *
    * ```js
    * await expect(page).not.toHaveURL('error');

@@ -25,9 +25,11 @@ import { launchBrowserServer, printApiJson, runDriver, runServer } from './drive
 import { registry, writeDockerVersion } from '../server';
 import { gracefullyProcessExitDoNotHang, isLikelyNpxGlobal, ManualPromise } from '../utils';
 import { runTraceInBrowser, runTraceViewerApp } from '../server/trace/viewer/traceViewer';
+import { addTraceCommands } from '../tools/trace/traceCli';
 import { assert, getPackageManagerExecCommand } from '../utils';
 import { wrapInASCIIBox } from '../server/utils/ascii';
 import { dotenv, program } from '../utilsBundle';
+import { program as cliProgram } from '../tools/cli-client/program';
 
 import type { Browser } from '../client/browser';
 import type { BrowserContext } from '../client/browserContext';
@@ -296,6 +298,7 @@ program
     .option('--path <path>', 'Endpoint Path', '/')
     .option('--max-clients <maxClients>', 'Maximum clients')
     .option('--mode <mode>', 'Server mode, either "default" or "extension"')
+    .option('--artifacts-dir <artifactsDir>', 'Artifacts directory')
     .action(function(options) {
       runServer({
         port: options.port ? +options.port : undefined,
@@ -303,6 +306,7 @@ program
         path: options.path,
         maxConnections: options.maxClients ? +options.maxClients : Infinity,
         extension: options.mode === 'extension' || !!process.env.PW_EXTENSION_MODE,
+        artifactsDir: options.artifactsDir,
       }).catch(logErrorAndExit);
     });
 
@@ -344,12 +348,23 @@ program
       if (options.port !== undefined || options.host !== undefined)
         runTraceInBrowser(trace, openOptions).catch(logErrorAndExit);
       else
-        runTraceViewerApp(trace, options.browser, openOptions, true).catch(logErrorAndExit);
+        runTraceViewerApp(trace, options.browser, openOptions).catch(logErrorAndExit);
     }).addHelpText('afterAll', `
 Examples:
 
   $ show-trace
   $ show-trace https://example.com/trace.zip`);
+
+addTraceCommands(program, logErrorAndExit);
+
+program
+    .command('cli', { hidden: true })
+    .allowExcessArguments(true)
+    .allowUnknownOption(true)
+    .action(async options => {
+      process.argv.splice(process.argv.indexOf('cli'), 1);
+      cliProgram();
+    });
 
 type Options = {
   browser: string;

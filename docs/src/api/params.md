@@ -810,6 +810,8 @@ When set to `minimal`, only record information necessary for routing from HAR. T
     Actual picture of each page will be scaled down if necessary to fit the specified size.
     - `width` <[int]> Video frame width.
     - `height` <[int]> Video frame height.
+  - `annotate` ?<[Object]> If specified, enables visual annotations on interacted elements during video recording.
+    - `delay` ?<[int]> How long each annotation is displayed in milliseconds. Defaults to `500`.
 
 Enables video recording for all pages into `recordVideo.dir` directory. If not specified videos are not recorded. Make
 sure to await [`method: BrowserContext.close`] for videos to be saved.
@@ -890,10 +892,19 @@ Options to select. If the `<select>` has the `multiple` attribute, all matching 
 first option matching one of the passed options is selected. String values are matching both values and labels. Option
 is considered matching if all specified properties match.
 
-## wait-for-navigation-url
+## js-wait-for-navigation-url
+* langs: js
+- `url` <[string]|[RegExp]|[URLPattern]|[function]\([URL]\):[boolean]>
+
+A glob pattern, regex pattern, URL pattern, or predicate receiving [URL] to match while waiting for the navigation. Note that if
+the parameter is a string without wildcard characters, the method will wait for navigation to URL that is exactly
+equal to the string.
+
+## python-csharp-java-wait-for-navigation-url
+* langs: python, csharp, java
 - `url` <[string]|[RegExp]|[function]\([URL]\):[boolean]>
 
-A glob pattern, regex pattern or predicate receiving [URL] to match while waiting for the navigation. Note that if
+A glob pattern, regex pattern, or predicate receiving [URL] to match while waiting for the navigation. Note that if
 the parameter is a string without wildcard characters, the method will wait for navigation to URL that is exactly
 equal to the string.
 
@@ -1143,6 +1154,11 @@ Logger sink for Playwright logging.
 Maximum time in milliseconds to wait for the browser instance to start. Defaults to `30000` (30 seconds). Pass `0` to
 disable timeout.
 
+## browser-option-artifactsdir
+- `artifactsDir` <[path]>
+
+If specified, artifacts (traces, videos, downloads, HAR files, etc.) are saved into this directory. The directory is not cleaned up when the browser closes. If not specified, a temporary directory is used and cleaned up when the browser closes.
+
 ## browser-option-tracesdir
 - `tracesDir` <[path]>
 
@@ -1155,6 +1171,7 @@ Slows down Playwright operations by the specified amount of milliseconds. Useful
 
 ## shared-browser-options-list-v1.8
 - %%-browser-option-args-%%
+- %%-browser-option-artifactsdir-%%
 - %%-browser-option-channel-%%
 - %%-browser-option-chromiumsandbox-%%
 - %%-browser-option-downloadspath-%%
@@ -1450,7 +1467,7 @@ Consider the following DOM structure.
 <button data-testid="directions">Itinéraire</button>
 ```
 
-You can locate the element by it's test id:
+You can locate the element by its test id:
 
 ```js
 await page.getByTestId('directions').click();
@@ -1722,7 +1739,7 @@ Consider the following DOM structure.
 <button>Submit</button>
 ```
 
-You can locate each element by it's implicit role:
+You can locate each element by its implicit role:
 
 ```js
 await expect(page.getByRole('heading', { name: 'Sign up' })).toBeVisible();

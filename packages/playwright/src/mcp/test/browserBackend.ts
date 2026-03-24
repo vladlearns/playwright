@@ -14,47 +14,41 @@
  * limitations under the License.
  */
 
-import * as mcp from '../sdk/exports';
-import { defaultConfig } from '../browser/config';
-import { BrowserServerBackend } from '../browser/browserServerBackend';
-import { Tab } from '../browser/tab';
+import { createGuid } from 'playwright-core/lib/utils';
+import * as tools from 'playwright-core/lib/tools/exports';
+
 import { stripAnsiEscapes } from '../../util';
-import { identityBrowserContextFactory } from '../browser/browserContextFactory';
 
 import type * as playwright from '../../../index';
-import type { Page } from '../../../../playwright-core/src/client/page';
-import type { TestInfo } from '../../../test';
+import type { TestInfoImpl } from '../../worker/testInfo';
+import type { Browser } from '../../../../playwright-core/src/client/browser';
 
 export type BrowserMCPRequest = {
-  initialize?: { clientInfo: mcp.ClientInfo },
+  initialize?: { clientInfo: tools.ClientInfo },
   listTools?: {},
-  callTool?: { name: string, arguments: mcp.CallToolRequest['params']['arguments'] },
+  callTool?: { name: string, arguments: tools.CallToolRequest['params']['arguments'] },
   close?: {},
 };
 
 export type BrowserMCPResponse = {
   initialize?: { pausedMessage: string },
-  listTools?: mcp.Tool[],
-  callTool?: mcp.CallToolResult,
+  callTool?: tools.CallToolResult,
   close?: {},
 };
 
-export function createCustomMessageHandler(testInfo: TestInfo, context: playwright.BrowserContext) {
-  let backend: BrowserServerBackend | undefined;
+export function createCustomMessageHandler(testInfo: TestInfoImpl, context: playwright.BrowserContext) {
+  let backend: tools.BrowserBackend | undefined;
+  const config: tools.ContextConfig = { capabilities: ['testing'] };
+  const toolList = tools.filteredTools(config);
+
   return async (data: BrowserMCPRequest): Promise<BrowserMCPResponse> => {
     if (data.initialize) {
       if (backend)
         throw new Error('MCP backend is already initialized');
-      backend = new BrowserServerBackend({ ...defaultConfig, capabilities: ['testing'] }, identityBrowserContextFactory(context));
+      backend = new tools.BrowserBackend(config, context, toolList);
       await backend.initialize(data.initialize.clientInfo);
       const pausedMessage = await generatePausedMessage(testInfo, context);
       return { initialize: { pausedMessage } };
-    }
-
-    if (data.listTools) {
-      if (!backend)
-        throw new Error('MCP backend is not initialized');
-      return { listTools: await backend.listTools() };
     }
 
     if (data.callTool) {
@@ -64,7 +58,7 @@ export function createCustomMessageHandler(testInfo: TestInfo, context: playwrig
     }
 
     if (data.close) {
-      backend?.serverClosed();
+      await backend?.dispose();
       backend = undefined;
       return { close: {} };
     }
@@ -73,7 +67,7 @@ export function createCustomMessageHandler(testInfo: TestInfo, context: playwrig
   };
 }
 
-async function generatePausedMessage(testInfo: TestInfo, context: playwright.BrowserContext) {
+async function generatePausedMessage(testInfo: TestInfoImpl, context: playwright.BrowserContext) {
   const lines: string[] = [];
 
   if (testInfo.errors.length) {
@@ -94,7 +88,7 @@ async function generatePausedMessage(testInfo: TestInfo, context: playwright.Bro
         `- Page Title: ${await page.title()}`.trim()
     );
     // Only print console errors when pausing on error, not when everything works as expected.
-    let console = testInfo.errors.length ? await Tab.collectConsoleMessages(page) : [];
+    let console = testInfo.errors.length ? await tools.Tab.collectConsoleMessages(page) : [];
     console = console.filter(msg => msg.type === 'error');
     if (console.length) {
       lines.push('- Console Messages:');
@@ -104,7 +98,7 @@ async function generatePausedMessage(testInfo: TestInfo, context: playwright.Bro
     lines.push(
         `- Page Snapshot:`,
         '```yaml',
-        (await (page as Page)._snapshotForAI()).full,
+        await page.ariaSnapshot({ mode: 'ai' }),
         '```',
     );
   }
@@ -114,4 +108,23 @@ async function generatePausedMessage(testInfo: TestInfo, context: playwright.Bro
     lines.push(`### Task`, `Try recovering from the error prior to continuing`);
 
   return lines.join('\n');
+}
+
+export async function runDaemonForContext(testInfo: TestInfoImpl, context: playwright.BrowserContext) {
+  if (testInfo._configInternal.configCLIOverrides.debug !== 'cli')
+    return false;
+
+  const sessionName = `tw-${createGuid().slice(0, 6)}`;
+  await (context.browser() as Browser)!._register(sessionName, { workspaceDir: testInfo.project.testDir });
+
+  /* eslint-disable-next-line no-console */
+  console.log([
+    `### The test is currently paused at the start`,
+    ``,
+    `### Debugging Instructions`,
+    `- Run "playwright-cli attach ${sessionName}" to attach to this test`,
+  ].join('\n'));
+
+  await context.debugger.pause();
+  return true;
 }

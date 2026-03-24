@@ -535,7 +535,7 @@ steps.push(new ProgramStep({
 }));
 
 // Build/watch web packages.
-for (const webPackage of ['html-reporter', 'recorder', 'trace-viewer']) {
+for (const webPackage of ['html-reporter', 'recorder', 'trace-viewer', 'dashboard']) {
   steps.push(new ProgramStep({
     command: 'npx',
     args: [
@@ -554,8 +554,8 @@ for (const webPackage of ['html-reporter', 'recorder', 'trace-viewer']) {
 // Generate CLI help.
 onChanges.push({
   inputs: [
-    'packages/playwright/src/mcp/terminal/commands.ts',
-    'packages/playwright/src/mcp/terminal/helpGenerator.ts',
+    'packages/playwright-core/src/tools/cli-daemon/commands.ts',
+    'packages/playwright-core/src/tools/cli-daemon/helpGenerator.ts',
     'utils/generate_cli_help.js',
   ],
   script: 'utils/generate_cli_help.js',
@@ -634,6 +634,7 @@ copyFiles.push({
   to: 'packages/playwright-core/lib',
 });
 
+
 copyFiles.push({
   files: 'packages/playwright/src/agents/*.md',
   from: 'packages/playwright/src',
@@ -647,27 +648,31 @@ copyFiles.push({
 });
 
 copyFiles.push({
-  files: 'packages/playwright/src/mcp/terminal/*.md',
-  from: 'packages/playwright/src',
-  to: 'packages/playwright/lib',
+  files: 'packages/playwright-core/src/tools/cli-client/skill/**/*.md',
+  from: 'packages/playwright-core/src',
+  to: 'packages/playwright-core/lib',
+});
+
+copyFiles.push({
+  files: 'packages/playwright-core/src/tools/trace/SKILL.md',
+  from: 'packages/playwright-core/src',
+  to: 'packages/playwright-core/lib',
+});
+
+copyFiles.push({
+  files: 'packages/playwright-core/src/tools/dashboard/*.{png,ico}',
+  from: 'packages/playwright-core/src',
+  to: 'packages/playwright-core/lib',
 });
 
 if (watchMode) {
   // Run TypeScript for type checking.
   steps.push(new ProgramStep({
     command: 'npx',
-    args: ['tsc', ...(watchMode ? ['-w'] : []), '--preserveWatchOutput', '-p', quotePath(filePath('.'))],
+    args: ['tsc', '-w', '--preserveWatchOutput', '-p', quotePath(filePath('.'))],
     shell: true,
     concurrent: true,
   }));
-  for (const webPackage of ['html-reporter', 'recorder', 'trace-viewer']) {
-    steps.push(new ProgramStep({
-      command: 'npx',
-      args: ['tsc', ...(watchMode ? ['-w'] : []), '--preserveWatchOutput', '-p', quotePath(filePath(`packages/${webPackage}`))],
-      shell: true,
-      concurrent: true,
-    }));
-  }
 }
 
 let cleanupCalled = false;

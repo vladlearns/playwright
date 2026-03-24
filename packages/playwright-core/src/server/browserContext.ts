@@ -19,7 +19,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { createGuid } from './utils/crypto';
-import { debugMode } from './utils/debug';
+import { debugMode, isUnderTest } from './utils/debug';
 import { Clock } from './clock';
 import { Debugger } from './debugger';
 import { DialogManager } from './dialog';
@@ -63,8 +63,9 @@ const BrowserContextEvent = {
   RequestFulfilled: 'requestfulfilled',
   RequestContinued: 'requestcontinued',
   BeforeClose: 'beforeclose',
-  VideoStarted: 'videostarted',
   RecorderEvent: 'recorderevent',
+  PageClosed: 'pageclosed',
+  InternalFrameNavigatedToNewDocument: 'internalframenavigatedtonewdocument',
 } as const;
 
 export type BrowserContextEventMap = {
@@ -80,8 +81,9 @@ export type BrowserContextEventMap = {
   [BrowserContextEvent.RequestFulfilled]: [request: network.Request];
   [BrowserContextEvent.RequestContinued]: [request: network.Request];
   [BrowserContextEvent.BeforeClose]: [];
-  [BrowserContextEvent.VideoStarted]: [artifact: Artifact];
   [BrowserContextEvent.RecorderEvent]: [event: { event: 'actionAdded' | 'actionUpdated' | 'signalAdded', data: any, page: Page, code: string }];
+  [BrowserContextEvent.PageClosed]: [page: Page];
+  [BrowserContextEvent.InternalFrameNavigatedToNewDocument]: [frame: frames.Frame, page: Page];
 };
 
 export abstract class BrowserContext<EM extends EventMap = EventMap> extends SdkObject<BrowserContextEventMap | EM> {
@@ -147,24 +149,27 @@ export abstract class BrowserContext<EM extends EventMap = EventMap> extends Sdk
     // Debugger will pause execution upon page.pause in headed mode.
     this._debugger = new Debugger(this);
 
-    // When PWDEBUG=1, show inspector for each context.
-    if (debugMode() === 'inspector')
-      await RecorderApp.show(this, { pauseOnNextStatement: true });
-
     // When paused, show inspector.
-    if (this._debugger.isPaused())
-      RecorderApp.showInspectorNoReply(this);
+    const shouldEnableDebugger = !this.attribution.playwright.options.isServer && (isUnderTest() || !!this._browser.options.headful);
+    if (shouldEnableDebugger) {
+      this._debugger.setPauseAt();
+      this._debugger.on(Debugger.Events.PausedStateChanged, () => {
+        if (this._debugger.isPaused())
+          RecorderApp.showInspectorNoReply(this);
+      });
+    }
 
-    this._debugger.on(Debugger.Events.PausedStateChanged, () => {
-      if (this._debugger.isPaused())
-        RecorderApp.showInspectorNoReply(this);
-    });
+    // When PWDEBUG=1, show inspector for each context.
+    if (debugMode() === 'inspector') {
+      this._debugger.setPauseAt({ next: true });
+      await RecorderApp.show(this, { pauseOnNextStatement: true });
+    }
 
     if (debugMode() === 'console')
       await this.exposeConsoleApi();
 
     if (this._options.serviceWorkers === 'block')
-      await this.addInitScript(undefined, `\nif (navigator.serviceWorker) navigator.serviceWorker.register = async () => { console.warn('Service Worker registration blocked by Playwright'); };\n`);
+      await this.addInitScript(`\nif (navigator.serviceWorker) navigator.serviceWorker.register = async () => { console.warn('Service Worker registration blocked by Playwright'); };\n`);
 
     if (this._options.permissions)
       await this.grantPermissions(this._options.permissions);
@@ -335,7 +340,7 @@ export abstract class BrowserContext<EM extends EventMap = EventMap> extends Sdk
     this._playwrightBindingExposed ??= (async () => {
       await this.doExposePlaywrightBinding();
 
-      this.bindingsInitScript = PageBinding.createInitScript();
+      this.bindingsInitScript = PageBinding.createInitScript(this);
       this.initScripts.push(this.bindingsInitScript);
       await this.doAddInitScript(this.bindingsInitScript);
       await this.safeNonStallingEvaluateInAllFrames(this.bindingsInitScript.source, 'main');
@@ -355,7 +360,7 @@ export abstract class BrowserContext<EM extends EventMap = EventMap> extends Sdk
         throw new Error(`Function "${name}" has been already registered in one of the pages`);
     }
     await progress.race(this.exposePlaywrightBindingIfNeeded());
-    const binding = new PageBinding(name, playwrightBinding, needsHandle);
+    const binding = new PageBinding(this, name, playwrightBinding, needsHandle);
     binding.forClient = forClient;
     this._pageBindings.set(name, binding);
     try {
@@ -368,12 +373,12 @@ export abstract class BrowserContext<EM extends EventMap = EventMap> extends Sdk
     }
   }
 
-  async removeExposedBindings(bindings: PageBinding[]) {
-    bindings = bindings.filter(binding => this._pageBindings.get(binding.name) === binding);
-    for (const binding of bindings)
-      this._pageBindings.delete(binding.name);
-    await this.doRemoveInitScripts(bindings.map(binding => binding.initScript));
-    const cleanup = bindings.map(binding => `{ ${binding.cleanupScript} };\n`).join('');
+  async removeExposedBinding(binding: PageBinding) {
+    if (this._pageBindings.get(binding.name) !== binding)
+      return;
+    this._pageBindings.delete(binding.name);
+    await this.doRemoveInitScripts([binding.initScript]);
+    const cleanup = `{ ${binding.cleanupScript} };`;
     await this.safeNonStallingEvaluateInAllFrames(cleanup, 'main');
   }
 
@@ -473,27 +478,22 @@ export abstract class BrowserContext<EM extends EventMap = EventMap> extends Sdk
       this._options.httpCredentials = { username, password: password || '' };
   }
 
-  async addInitScript(progress: Progress | undefined, source: string) {
-    const initScript = new InitScript(source);
+  async addInitScript(source: string) {
+    const initScript = new InitScript(this, source);
     this.initScripts.push(initScript);
     try {
-      const promise = this.doAddInitScript(initScript);
-      if (progress)
-        await progress.race(promise);
-      else
-        await promise;
+      await this.doAddInitScript(initScript);
       return initScript;
     } catch (error) {
       // Note: no await, init script will be removed in the background as soon as possible.
-      this.removeInitScripts([initScript]).catch(() => {});
+      initScript.dispose().catch(() => {});
       throw error;
     }
   }
 
-  async removeInitScripts(initScripts: InitScript[]) {
-    const set = new Set(initScripts);
-    this.initScripts = this.initScripts.filter(script => !set.has(script));
-    await this.doRemoveInitScripts(initScripts);
+  async removeInitScript(initScript: InitScript) {
+    this.initScripts = this.initScripts.filter(script => initScript !== script);
+    await this.doRemoveInitScripts([initScript]);
   }
 
   async addRequestInterceptor(progress: Progress, handler: network.RouteHandler): Promise<void> {

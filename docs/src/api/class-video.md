@@ -26,33 +26,33 @@ Console.WriteLine(await page.Video.GetPathAsync());
 Alternatively, you can use [`method: Video.start`] and [`method: Video.stop`] to record video manually. This approach is mutually exclusive with the `recordVideo` option.
 
 ```js
-await page.video().start();
+await page.video().start({ path: 'video.webm' });
 // ... perform actions ...
-await page.video().stop({ path: 'video.webm' });
+await page.video().stop();
 ```
 
 ```java
-page.video().start();
+page.video().start(new Video.StartOptions().setPath(Paths.get("video.webm")));
 // ... perform actions ...
-page.video().stop(new Video.StopOptions().setPath(Paths.get("video.webm")));
+page.video().stop();
 ```
 
 ```python async
-await page.video.start()
+await page.video.start(path="video.webm")
 # ... perform actions ...
-await page.video.stop(path="video.webm")
+await page.video.stop()
 ```
 
 ```python sync
-page.video.start()
+page.video.start(path="video.webm")
 # ... perform actions ...
-page.video.stop(path="video.webm")
+page.video.stop()
 ```
 
 ```csharp
-await page.Video.StartAsync();
+await page.Video.StartAsync(new() { Path = "video.webm" });
 // ... perform actions ...
-await page.Video.StopAsync(new() { Path = "video.webm" });
+await page.Video.StopAsync();
 ```
 
 ## async method: Video.delete
@@ -94,40 +94,47 @@ Path where the video should be saved.
 
 ## async method: Video.start
 * since: v1.59
+- returns: <[Disposable]>
 
 Starts video recording. This method is mutually exclusive with the `recordVideo` context option.
 
 **Usage**
 
 ```js
-await page.video().start();
+await page.video().start({ path: 'video.webm' });
 // ... perform actions ...
-await page.video().stop({ path: 'video.webm' });
+await page.video().stop();
 ```
 
 ```java
-page.video().start();
+page.video().start(new Video.StartOptions().setPath(Paths.get("video.webm")));
 // ... perform actions ...
-page.video().stop(new Video.StopOptions().setPath(Paths.get("video.webm")));
+page.video().stop();
 ```
 
 ```python async
-await page.video.start()
+await page.video.start(path="video.webm")
 # ... perform actions ...
-await page.video.stop(path="video.webm")
+await page.video.stop()
 ```
 
 ```python sync
-page.video.start()
+page.video.start(path="video.webm")
 # ... perform actions ...
-page.video.stop(path="video.webm")
+page.video.stop()
 ```
 
 ```csharp
-await page.Video.StartAsync();
+await page.Video.StartAsync(new() { Path = "video.webm" });
 // ... perform actions ...
-await page.Video.StopAsync(new() { Path = "video.webm" });
+await page.Video.StopAsync();
 ```
+
+### option: Video.start.path
+* since: v1.59
+- `path` <[path]>
+
+Path where the video should be saved when the recording is stopped.
 
 ### option: Video.start.size
 * since: v1.59
@@ -137,13 +144,14 @@ await page.Video.StopAsync(new() { Path = "video.webm" });
 
 Optional dimensions of the recorded video. If not specified the size will be equal to page viewport scaled down to fit into 800x800. Actual picture of the page will be scaled down if necessary to fit the specified size.
 
+### option: Video.start.annotate
+* since: v1.59
+- `annotate` ?<[Object]>
+  - `delay` ?<[int]> How long each annotation is displayed in milliseconds. Defaults to `500`.
+
+If specified, enables visual annotations on interacted elements during video recording. Interacted elements are highlighted with a semi-transparent blue box and click points are shown as red circles.
+
 ## async method: Video.stop
 * since: v1.59
 
-Stops video recording started with [`method: Video.start`] and either saves or discards the video file.
-
-### option: Video.stop.path
-* since: v1.59
-- `path` <[path]>
-
-Path where the video should be saved.
+Stops video recording started with [`method: Video.start`].
